@@ -16,6 +16,7 @@ let judgeScores = { originality: 3, feasibility: 3, impact: 3 };
 let judgeKeywords = ['Public Space', 'sound'];
 let judgeLift: Record<string, string> = {}; // liftType + lift, when a test wants the jury to write a recipe
 let retrialScores: typeof judgeScores | null = null; // what the second judge (the retrial model) answers, when a test sets it
+let trialLot = 0.99; // placebo trials: the engine's lot; below PLACEBO_RATE sends a recipe breed to the placebo arm
 let failNext: Error | null = null;
 let xCitations: string[] = [];
 
@@ -60,7 +61,7 @@ const pages: Record<string, { title: string; text: string }> = {
   'https://example.com/tom': { title: '', text: 'kort' },
 };
 const engine = createEngine({
-  repo, chat: fakeChat, settings: () => settings, gitInit: false,
+  repo, chat: fakeChat, settings: () => settings, gitInit: false, trialRng: () => trialLot,
   fetchPage: async (url) => {
     if (!pages[url]) throw new Error('HTTP 404');
     return pages[url];
@@ -434,7 +435,7 @@ test('lift recipes: the jury writes one, offspring get it as their task, and the
     await engine.idle();
     const kids = data.ideas.map((i: any) => repo.getIdea(i.id)!);
     for (const k of kids) {
-      assert.deepEqual([k.liftType, k.liftFrom, k.liftBase], ['feasibility', s.id, 1]);
+      assert.deepEqual([k.liftType, k.liftFrom, k.liftBase, k.liftArm], ['feasibility', s.id, 1, 'recipe']);
       assert.equal(liftHit(k), true);
     }
     assert.deepEqual(liftStats(repo.listIdeas(board.id)).feasibility, { tries: 3, hits: 3 });
@@ -452,6 +453,53 @@ test('lift recipes: the jury writes one, offspring get it as their task, and the
     await engine.idle();
     assert.deepEqual([repo.getIdea(odd.id)!.recipeType, repo.getIdea(odd.id)!.recipe], [null, null]);
   } finally {
+    judgeLift = {};
+    judgeScores = { originality: 3, feasibility: 3, impact: 3 };
+  }
+});
+
+test('placebo trials: by lot a breed gets a vague task instead of the recipe, and a parent with no recipe breeds a no-task control', async () => {
+  const { liftStats, liftHit, trialStats, armHit } = await import('../public/js/evolve.js');
+  const { PLACEBO_TASK } = await import('../server/llm.ts');
+  try {
+    judgeScores = { originality: 3, feasibility: 3, impact: 3 }; // 9: bronze
+    judgeLift = { liftType: 'impact', lift: 'Mät minskade bilresor.' };
+    const board = await newBoard();
+    const s = await seed(board.id, 'Skolgata');
+    await engine.idle();
+
+    // The lot falls on placebo: the prompt holds neither the recipe nor its criterion, only the vague task.
+    trialLot = 0;
+    judgeScores = { originality: 4, feasibility: 4, impact: 3 }; // 11: silver, the medal rose anyway
+    const { data } = await api('POST', `/api/ideas/${s.id}/expand`, {});
+    const user = lastCall('expand').user;
+    assert.ok(user.includes(PLACEBO_TASK));
+    assert.doesNotMatch(user, /Mät minskade bilresor|lift recipe|raising its/);
+    await engine.idle();
+    for (const i of data.ideas) {
+      const k = repo.getIdea(i.id)!;
+      assert.deepEqual([k.liftArm, k.liftType, k.liftFrom, k.liftBase], ['placebo', 'impact', s.id, 1], 'remembers the withheld type');
+      assert.equal(liftHit(k), null, 'a placebo is not a recipe hit');
+      assert.equal(armHit(k), true);
+    }
+    const ideas = repo.listIdeas(board.id);
+    assert.deepEqual(liftStats(ideas).impact, { tries: 0, hits: 0 }, 'placebo luck never steers breeding');
+    assert.deepEqual(trialStats(ideas).placebo.byType.impact, { tries: 3, hits: 3 });
+
+    // A bronze parent with no recipe: no task at all, counted in the no-task arm.
+    trialLot = 0.99;
+    judgeScores = { originality: 3, feasibility: 3, impact: 3 };
+    judgeLift = {};
+    const bare = await seed(board.id, 'Ingen recept');
+    await engine.idle();
+    const r2 = await api('POST', `/api/ideas/${bare.id}/expand`, {});
+    assert.doesNotMatch(lastCall('expand').user, /Your task|lift recipe/);
+    await engine.idle();
+    const k = repo.getIdea(r2.data.ideas[0].id)!;
+    assert.deepEqual([k.liftArm, k.liftType, k.liftFrom, k.liftBase], ['none', null, bare.id, 1]);
+    assert.deepEqual(trialStats(repo.listIdeas(board.id)).none.total, { tries: 3, hits: 0 });
+  } finally {
+    trialLot = 0.99;
     judgeLift = {};
     judgeScores = { originality: 3, feasibility: 3, impact: 3 };
   }
@@ -477,6 +525,8 @@ test('lift recipes: an old database gets the new columns', async () => {
   assert.equal(got.retrial, null);
   r.saveRetrial(i.id, { originality: 2, feasibility: 3, impact: 3, reason: 'r2', model: 'm', at: 'now' });
   assert.equal(r.getIdea(i.id)!.retrial!.originality, 2, 'the retrial column was added too');
+  const k = r.insertIdea({ boardId: b.id, title: 'K', pitch: '', kind: 'expand', x: 0, y: 0, generation: 1, lift: { type: 'impact', from: i.id, base: 1, arm: 'placebo' } }, [i.id]);
+  assert.equal(r.getIdea(k.id)!.liftArm, 'placebo', 'the lift_arm column was added too');
 });
 
 test('second opinion: an edge verdict on a self-improvement board is re-scored blind by the retrial model', async () => {

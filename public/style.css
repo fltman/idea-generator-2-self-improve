@@ -146,6 +146,15 @@ main { display: flex; min-height: 0; }
 .lift-task .linkish { text-align: left; }
 .lift-hit { color: #5fd38d; }
 .lift-miss { color: #e58a7a; }
+.lift-task.arm-placebo .linkish, .lift-task.arm-none .linkish { font-style: italic; }
+table.trial { width: 100%; border-collapse: collapse; margin: 6px 0 4px; font-size: 12px; font-variant-numeric: tabular-nums; }
+table.trial th, table.trial td { padding: 2px 4px; text-align: right; font-weight: 400; }
+table.trial th:first-child { text-align: left; color: var(--text-2); }
+table.trial thead th { color: var(--text-2); font-size: 11px; }
+table.trial .trial-total th, table.trial .trial-total td { border-top: 1px solid var(--line); font-weight: 600; }
+.trial-verdict { font-size: 12px; color: var(--text-2); }
+.trial-verdict.ahead { color: #5fd38d; }
+.trial-verdict.behind { color: #e58a7a; }
 .doubt { margin: 0 0 12px; padding: 10px 12px; border-radius: var(--radius); border: 1px solid var(--line); font-size: 12px; }
 .doubt.disagree { border-color: rgba(229,138,122,.55); }
 .doubt.agree { border-color: rgba(95,211,141,.45); }

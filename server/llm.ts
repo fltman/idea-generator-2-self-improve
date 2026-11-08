@@ -11,7 +11,7 @@ export type { ChatFn, ChatRequest } from './providers.ts';
 export type Lang = 'sv' | 'en';
 type Pitch = { title: string; pitch: string };
 /** A parent's lift recipe, handed to its offspring as their task. */
-export type LiftTask = { type: string; change: string; from: Pitch };
+export type LiftTask = { type: string | null; change: string | null; from: Pitch; arm?: string };
 type Flow = { system: string; expand: string; combine: string };
 /** fixedLang: write in this language whatever the sources are in (self-improvement boards: the code and journal follow the board). */
 type BoardCtx = { goal: string; fixedLang?: Lang };
@@ -21,9 +21,13 @@ export type Judgement = {
   liftType: string | null; lift: string | null;
 };
 
+/** Placebo trials: what a child in the placebo arm is told instead of its parent's recipe. Deliberately vague. */
+export const PLACEBO_TASK = 'Your task: improve it.';
+
 /** The task line for a child bred under a lift recipe. */
 function liftTaskText(t: LiftTask | null | undefined, many = false) {
-  if (!t) return '';
+  // The no-task arm gets nothing; the placebo arm gets a vague task with no criterion and no recipe.
+  if (!t || t.arm === 'none' || !t.change) return t?.arm === 'placebo' ? PLACEBO_TASK : '';
   return [
     `The jury's lift recipe for "${t.from.title}" (the one change that would earn it the next medal, by raising its ${t.type}):`,
     t.change,

@@ -12,7 +12,7 @@ import { fetchPapers as realFetchPapers, researchLeads, xLeads } from './leads.t
 import { writeBrief, writeProject } from './project.ts';
 import { ProviderError, type AppSettings, type ChatFn, type Role } from './providers.ts';
 import { fitness, isJudged, medal, scoreSum, onMedalEdge, goldGate } from '../public/js/score.js';
-import { nextMove, recipeOf, pickRecipe, liftStats } from '../public/js/evolve.js';
+import { nextMove, assignArm, liftStats } from '../public/js/evolve.js';
 
 export class AppError extends Error {
   status: number;
@@ -79,6 +79,8 @@ type Deps = {
   onGold?: (idea: Idea, by: 'jury' | 'hand') => void;
   /** Self-improvement boards: what the app is and does today, added to every prompt. */
   selfContext?: () => string;
+  /** Placebo trials: the lot that sends a recipe breed to the placebo arm (tests fix it). */
+  trialRng?: () => number;
 };
 
 export function createEngine(deps: Deps) {
@@ -87,6 +89,7 @@ export function createEngine(deps: Deps) {
   const fetchPapers = deps.fetchPapers ?? realFetchPapers;
   const reveal = deps.reveal ?? ((p: string) => execFile('open', [p], () => {}));
   const llm = makeLLM(deps.chat);
+  const trialRng = deps.trialRng ?? Math.random;
   const bus = createBus();
   const judging = new Set<number>();
 
@@ -289,13 +292,13 @@ export function createEngine(deps: Deps) {
   async function doExpand(parentId: number) {
     const parent = mustIdea(parentId);
     const board = mustBoard(parent.boardId);
-    // The parent's lift recipe becomes the children's task, and they remember it so the hit can be counted.
-    const task = recipeOf(parent);
+    // The parent's lift recipe becomes the children's task (or, by lot, the placebo), and they remember it so the hit can be counted.
+    const task = assignArm([parent], liftStats(repo.listIdeas(board.id)), trialRng);
     const { ideas } = await call(board.id, () =>
       llm.expand({ model: modelFor(board, 'expand'), flow: flowFor(board), board: ctxOf(board), idea: parent, existingTitles: titles(board.id), lang: board.config.lang, task }),
     );
     const spots = arcPositions(parent, repo.parentsOf(parent.id)[0] ?? null, ideas.length);
-    const lift = task ? { type: task.type, from: parent.id, base: task.base } : null;
+    const lift = task ? { type: task.type, from: parent.id, base: task.base, arm: task.arm } : null;
     const created = ideas.map((i, n) =>
       repo.insertIdea({ boardId: board.id, ...i, kind: 'expand', x: spots[n].x, y: spots[n].y, generation: parent.generation + 1, lift }, [parent.id]),
     );
@@ -311,8 +314,8 @@ export function createEngine(deps: Deps) {
     const a = mustIdea(aId);
     const c = mustIdea(bId);
     if (a.boardId !== board.id || c.boardId !== board.id) throw new AppError(400, 'bad_pair', 'Ideas belong to another board');
-    // Of the two parents' recipes, the type that has lifted medals more often on this board.
-    const task = pickRecipe(a, c, liftStats(repo.listIdeas(board.id)));
+    // Of the two parents' recipes, the type that has lifted medals more often on this board (or, by lot, the placebo).
+    const task = assignArm([a, c], liftStats(repo.listIdeas(board.id)), trialRng);
     const { idea } = await call(board.id, () =>
       llm.combine({ model: modelFor(board, 'combine'), flow: flowFor(board), board: ctxOf(board), a, b: c, existingTitles: titles(board.id), lang: board.config.lang, task }),
     );
@@ -322,7 +325,7 @@ export function createEngine(deps: Deps) {
         boardId: board.id, ...idea, kind: 'combine',
         x: (a.x + c.x) / 2 + (-dy / len) * 70, y: (a.y + c.y) / 2 + (dx / len) * 70,
         generation: Math.max(a.generation, c.generation) + 1,
-        lift: task ? { type: task.type, from: task.from.id, base: task.base } : null,
+        lift: task ? { type: task.type, from: task.from.id, base: task.base, arm: task.arm } : null,
       },
       [a.id, c.id],
     );
