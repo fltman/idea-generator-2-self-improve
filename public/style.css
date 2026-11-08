@@ -155,6 +155,9 @@ table.trial .trial-total th, table.trial .trial-total td { border-top: 1px solid
 .trial-verdict { font-size: 12px; color: var(--text-2); }
 .trial-verdict.ahead { color: #5fd38d; }
 .trial-verdict.behind { color: #e58a7a; }
+table.style-table .style-early td:nth-child(3) { color: var(--text-2); }
+.style-early-mark { font-size: 11px; }
+.style-tag { font-size: 11px; color: var(--text-2); border: 1px solid var(--line); border-radius: 8px; padding: 0 6px; }
 .lift-task.arm-control .linkish { font-style: italic; }
 .net-lift { margin-top: 8px; font-size: 12px; }
 .net-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }

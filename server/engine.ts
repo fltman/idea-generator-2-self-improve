@@ -12,7 +12,7 @@ import { fetchPapers as realFetchPapers, researchLeads, xLeads } from './leads.t
 import { writeBrief, writeProject } from './project.ts';
 import { ProviderError, type AppSettings, type ChatFn, type Role } from './providers.ts';
 import { fitness, isJudged, medal, scoreSum, onMedalEdge, goldGate } from '../public/js/score.js';
-import { nextMove, assignArm, liftStats, armOf, controlDue } from '../public/js/evolve.js';
+import { nextMove, assignArm, liftStats, armOf, controlDue, drawStyle } from '../public/js/evolve.js';
 
 export class AppError extends Error {
   status: number;
@@ -83,6 +83,8 @@ type Deps = {
   trialRng?: () => number;
   /** Blind duel: the coin that decides whether the child is shown as A or B (tests fix it). */
   duelRng?: () => number;
+  /** Idea styles: the lot that picks each breed's style. Its own rng, so the arm and duel draws stay as they were (tests fix it). */
+  styleRng?: () => number;
 };
 
 export function createEngine(deps: Deps) {
@@ -93,6 +95,7 @@ export function createEngine(deps: Deps) {
   const llm = makeLLM(deps.chat);
   const trialRng = deps.trialRng ?? Math.random;
   const duelRng = deps.duelRng ?? Math.random;
+  const styleRng = deps.styleRng ?? Math.random;
   const bus = createBus();
   const judging = new Set<number>();
 
@@ -361,13 +364,14 @@ export function createEngine(deps: Deps) {
     const board = mustBoard(parent.boardId);
     // The parent's lift recipe becomes the children's task (or, by lot, the placebo), and they remember it so the hit can be counted.
     const task = assignArm([parent], liftStats(repo.listIdeas(board.id)), trialRng);
+    const style = drawStyle(styleRng); // one style per breed, by lot, independent of the arm
     const { ideas } = await call(board.id, () =>
-      llm.expand({ model: modelFor(board, 'expand'), flow: flowFor(board), board: ctxOf(board), idea: parent, existingTitles: titles(board.id), lang: board.config.lang, task }),
+      llm.expand({ model: modelFor(board, 'expand'), flow: flowFor(board), board: ctxOf(board), idea: parent, existingTitles: titles(board.id), lang: board.config.lang, task, style }),
     );
     const spots = arcPositions(parent, repo.parentsOf(parent.id)[0] ?? null, ideas.length);
     const lift = task ? { type: task.type, from: parent.id, base: task.base, arm: task.arm } : null;
     const created = ideas.map((i, n) =>
-      repo.insertIdea({ boardId: board.id, ...i, kind: 'expand', x: spots[n].x, y: spots[n].y, generation: parent.generation + 1, lift, escape }, [parent.id]),
+      repo.insertIdea({ boardId: board.id, ...i, kind: 'expand', x: spots[n].x, y: spots[n].y, generation: parent.generation + 1, lift, escape, style }, [parent.id]),
     );
     const edges = created.map((c) => ({ from: parent.id, to: c.id }));
     emitIdeas(board.id, created);
@@ -384,8 +388,9 @@ export function createEngine(deps: Deps) {
     if (a.boardId !== board.id || c.boardId !== board.id) throw new AppError(400, 'bad_pair', 'Ideas belong to another board');
     // Of the two parents' recipes, the type that has lifted medals more often on this board (or, by lot, the placebo).
     const task = forced ?? assignArm([a, c], liftStats(repo.listIdeas(board.id)), trialRng);
+    const style = drawStyle(styleRng);
     const { idea } = await call(board.id, () =>
-      llm.combine({ model: modelFor(board, 'combine'), flow: flowFor(board), board: ctxOf(board), a, b: c, existingTitles: titles(board.id), lang: board.config.lang, task }),
+      llm.combine({ model: modelFor(board, 'combine'), flow: flowFor(board), board: ctxOf(board), a, b: c, existingTitles: titles(board.id), lang: board.config.lang, task, style }),
     );
     const dx = c.x - a.x, dy = c.y - a.y, len = Math.hypot(dx, dy) || 1; // midpoint, nudged off the line
     const created = repo.insertIdea(
@@ -395,6 +400,7 @@ export function createEngine(deps: Deps) {
         generation: Math.max(a.generation, c.generation) + 1,
         lift: task ? { type: task.type, from: task.from.id, base: task.base, arm: task.arm } : null,
         escape,
+        style,
       },
       [a.id, c.id],
     );

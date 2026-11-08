@@ -472,3 +472,31 @@ test('diversity gauge: the series over time, when the monoculture began, and wha
   assert.deepEqual([p.escapes, p.judged, p.left, p.last.id], [3, 2, 1, 62], 'one of two judged escapes really left the theme');
   assert.equal(pressureStats(ideas.slice(0, 14)).since, null, 'no monoculture, no start');
 });
+
+test('idea styles: the lot is uniform over four styles, and styleStats counts medals per style with a too-early mark', async () => {
+  const { STYLES, STYLE_MIN, drawStyle, styleStats } = await import('../public/js/evolve.js');
+  assert.deepEqual(STYLES, ['scenario', 'mechanism', 'analogy', 'metric']);
+  assert.deepEqual([0, 0.25, 0.5, 0.75, 0.999999].map((r) => drawStyle(() => r)), ['scenario', 'mechanism', 'analogy', 'metric', 'metric']);
+  assert.equal(drawStyle(() => 1), 'metric', 'never out of range');
+  const rng = rngFrom(10);
+  const counts: Record<string, number> = {};
+  for (let n = 0; n < 4000; n++) {
+    const s = drawStyle(rng);
+    counts[s] = (counts[s] ?? 0) + 1;
+  }
+  for (const s of STYLES) assert.ok(Math.abs(counts[s] / 4000 - 0.25) < 0.03, `${s}: ${counts[s]}`);
+
+  const ideas = [
+    ...Array.from({ length: STYLE_MIN }, (_, k) => idea(k + 1, k < 4 ? 13 : k < 7 ? 9 : 7, { style: 'metric' })),
+    idea(20, 11, { style: 'analogy' }),
+    idea(21, null, { style: 'analogy' }), // unjudged: not counted
+    idea(22, 14, { style: 'nonsense' }), // unknown style: skipped
+    idea(23, 14), // a seed with no style
+    idea(24, 7, { style: 'scenario', medalOverride: 2 }), // a hand-set medal counts as shown
+  ];
+  const s = styleStats(ideas);
+  assert.deepEqual(s.metric, { n: 10, medals: 7, golds: 4, rate: 0.7, early: false });
+  assert.deepEqual(s.analogy, { n: 1, medals: 1, golds: 0, rate: 1, early: true });
+  assert.deepEqual(s.scenario, { n: 1, medals: 1, golds: 0, rate: 1, early: true });
+  assert.deepEqual(s.mechanism, { n: 0, medals: 0, golds: 0, rate: null, early: true });
+});

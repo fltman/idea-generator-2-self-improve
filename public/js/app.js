@@ -9,7 +9,7 @@ import { medal, scoreSum, fitness, CRITERIA, isJudged, onMedalEdge, confidenceBa
 import {
   evolutionStats, liftStats, LIFT_TYPES, doubtPenalty, armOf, armHit, trialStats, trialVerdict, ARMS, TRIAL_MIN,
   diversity, diversitySeries, pressureStats, MONOCULTURE_SHARE, DIVERSITY_WINDOW, netLiftStats, CONTROL_EVERY,
-  appliedStatus, appliedStats, APPLIED_STATUSES, duelHit, duelStats,
+  appliedStatus, appliedStats, APPLIED_STATUSES, duelHit, duelStats, STYLES, STYLE_MIN, styleStats,
 } from './evolve.js';
 
 /** A net lift in medal steps, signed, two decimals: +0.33, −0.50, ±0.00. */
@@ -531,6 +531,34 @@ function liftOverview(ideas) {
   );
 }
 
+/**
+ * Overview: idea styles. Per style drawn by lot, the judged children (n), how
+ * many earned a medal and how many gold, with "too early" under STYLE_MIN.
+ * null on a board where no idea has a style yet.
+ */
+function styleOverview(ideas) {
+  if (!ideas.some((i) => STYLES.includes(i.style))) return null;
+  const stats = styleStats(ideas);
+  return h('div', { class: 'evo style-overview' },
+    h('span', { class: 'muted', title: t('styleHint') }, t('styleTitle')),
+    h('table', { class: 'trial style-table' },
+      h('thead', {}, h('tr', {}, h('th', {}, ''), h('th', {}, 'n'), h('th', {}, t('styleMedalRate')), h('th', {}, '🥇'))),
+      h('tbody', {},
+        STYLES.map((s) => {
+          const c = stats[s];
+          return h('tr', { class: c.early ? 'style-early' : '' },
+            h('th', { title: t(`styleHint_${s}`) }, t(`style_${s}`)),
+            h('td', {}, String(c.n)),
+            h('td', { class: c.n ? '' : 'muted' },
+              c.n ? `${c.medals}/${c.n} ${Math.round(100 * c.rate)}%` : '–',
+              c.early ? h('span', { class: 'muted style-early-mark', title: t('styleEarly', { n: STYLE_MIN }) }, ` · ${t('styleTooEarly')}`) : null),
+            h('td', { class: c.n ? '' : 'muted' }, c.n ? String(c.golds) : '–'));
+        }),
+      ),
+    ),
+  );
+}
+
 const DUEL_MARK = { child: '▲', parent: '▼', tie: '=' };
 
 /**
@@ -672,6 +700,9 @@ function renderIdea(idea) {
       h('button', { class: 'icon-btn', title: t('close'), 'aria-label': t('close'), onclick: () => graph.h.select(null) }, '✕'),
       kindTag(idea),
       h('span', { class: 'muted' }, t('generation', { n: idea.generation })),
+      STYLES.includes(idea.style)
+        ? h('span', { class: 'style-tag', title: t(`styleHint_${idea.style}`) }, `✎ ${t(`style_${idea.style}`)}`)
+        : null,
     ),
     idea.kind === 'guest' && idea.originBoardId
       ? h('button', { class: 'linkish', onclick: () => openBoard(idea.originBoardId) }, `↗ ${t('fromBoard', { b: idea.originBoardTitle ?? '?' })}`)
@@ -796,6 +827,7 @@ function renderOverview() {
       : null,
     diversityOverview(ideas),
     liftOverview(ideas),
+    styleOverview(ideas),
     h('section', { class: 'summary' },
       h('div', { class: 'row space' }, h('h3', {}, t('summary')),
         ideas.length >= 2 ? h('button', { class: 'btn small', onclick: (ev) => summarize(ev.currentTarget) }, s ? t('resummarize') : t('summarize')) : null),
