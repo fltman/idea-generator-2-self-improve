@@ -95,6 +95,23 @@ const JUDGE_SCHEMA = {
   additionalProperties: false,
 };
 
+// The recipe check: did a child carry out its parent's recipe? Reason first, so it argues before it rules.
+const LIFT_CHECK_SCHEMA = {
+  type: 'object',
+  properties: {
+    reason: {
+      type: 'string',
+      description: 'One sentence, at most 25 words: where in the new idea the change shows, or that it does not.',
+    },
+    applied: {
+      type: 'boolean',
+      description: 'true only if the new idea clearly carries out the recipe\'s change (not just mentions it); false if it ignores or merely gestures at it.',
+    },
+  },
+  required: ['reason', 'applied'],
+  additionalProperties: false,
+};
+
 // ---------------------------------------------------------------- prompts
 
 const LANG_NAME: Record<Lang, string> = { sv: 'Swedish', en: 'English' };
@@ -396,6 +413,33 @@ export function makeLLM(chat: ChatFn) {
       const lift = String(value?.lift ?? '').trim().slice(0, 300);
       if ((CRITERIA as readonly string[]).includes(liftType) && lift) Object.assign(judgement, { liftType, lift });
       return { judgement, costUsd };
+    },
+
+    /**
+     * The recipe check (build 0008): shown the parent, its recipe and the
+     * child, rule whether the child really carried out the recipe. It never
+     * sees any scores or medals, so the ruling cannot follow the medal.
+     * applied is null when the model gave no boolean.
+     */
+    async checkLift(a: { model: string; parent: Pitch; recipe: { type: string; change: string }; child: Pitch; lang: Lang }) {
+      const user = [
+        `The parent idea:\n${fmtIdea(a.parent)}`,
+        `The recipe the new idea was told to carry out (it raises the parent's ${a.recipe.type}):\n${a.recipe.change}`,
+        `The new idea:\n${fmtIdea(a.child)}`,
+        `Did the new idea carry out exactly this change? Write the reason in the language of the new idea; if unclear, in ${LANG_NAME[a.lang]}.`,
+      ].join('\n\n');
+      const { value, costUsd } = await chat({
+        model: a.model,
+        system:
+          'You check whether an instruction was followed. You do not judge whether the idea is good, only whether the stated change is visibly carried out in the new idea. Be strict: a vague nod to the change is not carrying it out.',
+        user,
+        schemaName: 'liftcheck',
+        schema: LIFT_CHECK_SCHEMA,
+        temperature: 0,
+        maxTokens: 300,
+      });
+      const applied = typeof value?.applied === 'boolean' ? value.applied : null;
+      return { applied, reason: String(value?.reason ?? '').trim().slice(0, 300), costUsd };
     },
   };
 }

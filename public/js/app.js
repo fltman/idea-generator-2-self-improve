@@ -9,6 +9,7 @@ import { medal, scoreSum, fitness, CRITERIA, isJudged, onMedalEdge, confidenceBa
 import {
   evolutionStats, liftStats, LIFT_TYPES, doubtPenalty, armOf, armHit, trialStats, trialVerdict, ARMS, TRIAL_MIN,
   diversity, diversitySeries, pressureStats, MONOCULTURE_SHARE, DIVERSITY_WINDOW, netLiftStats, CONTROL_EVERY,
+  appliedStatus, appliedStats, APPLIED_STATUSES,
 } from './evolve.js';
 
 /** A net lift in medal steps, signed, two decimals: +0.33, −0.50, ±0.00. */
@@ -431,6 +432,7 @@ function liftBlock(idea) {
         t(key, { p: parent ? `"${parent.title}"` : '?', type: idea.liftType ? typeName(idea.liftType) : '' })),
       h('div', { class: hit == null ? 'muted' : hit ? 'lift-hit' : 'lift-miss' },
         hit == null ? t('liftTaskPending') : hit ? t('liftTaskHit') : t('liftTaskMiss')),
+      appliedLine(idea),
     );
   }
   if (!recipe && !task) return null;
@@ -523,7 +525,34 @@ function liftOverview(ideas) {
         ? t('trialEarly', { n: TRIAL_MIN, r: stats.recipe.total.tries, p: stats.placebo.total.tries })
         : t(`trial_${v.verdict}`, { r: pct(stats.recipe.total), p: pct(stats.placebo.total) })) : null,
     any ? netChips(ideas) : null,
+    any ? appliedSplit(ideas) : null,
   );
+}
+
+/** A recipe child's check: did it really carry out the recipe? (null for other arms.) */
+function appliedLine(idea) {
+  const status = appliedStatus(idea);
+  if (!status) return null;
+  if (status === 'unchecked') return h('div', { class: 'lift-check muted', title: t('appliedHint') }, t('appliedUnchecked'));
+  return h('div', { class: `lift-check ${status}`, title: t('appliedHint') },
+    h('span', { class: 'applied-badge' }, t(status === 'applied' ? 'appliedYes' : 'appliedNo')),
+    idea.liftCheck ? h('span', { class: 'muted' }, ` ${idea.liftCheck}`) : null);
+}
+
+/** Overview: the recipe arm's hit rate split by the recipe check's ruling. */
+function appliedSplit(ideas) {
+  const s = appliedStats(ideas);
+  if (!APPLIED_STATUSES.some((k) => s[k].tries)) return null;
+  const cell = (k) => {
+    const c = s[k];
+    return h('span', { class: `applied-cell ${k}${c.tries ? '' : ' muted'}` },
+      h('span', {}, t(`applied_${k}`)), ' ',
+      h('b', {}, c.tries ? `${c.hits}/${c.tries}` : '–'),
+      c.tries ? h('span', { class: 'muted' }, ` ${Math.round((100 * c.hits) / c.tries)}%`) : null);
+  };
+  return h('div', { class: 'applied-split' },
+    h('span', { class: 'muted', title: t('appliedHint') }, t('appliedTitle')),
+    h('div', { class: 'applied-cells' }, APPLIED_STATUSES.map(cell)));
 }
 
 /** One chip per recipe type: mean medal gain of recipe children minus that of their control siblings, with both n. */

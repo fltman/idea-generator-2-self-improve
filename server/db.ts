@@ -51,6 +51,8 @@ CREATE TABLE IF NOT EXISTS ideas (
   lift_arm TEXT,
   escape_kw TEXT,
   retrial TEXT,
+  lift_applied INTEGER,
+  lift_check TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS ideas_board ON ideas(board_id);
@@ -307,6 +309,9 @@ export type Idea = {
   escape: string | null;
   /** A blind second judge's scores (verdicts on a medal edge), on another model. Cleared when the jury re-judges. */
   retrial: Retrial | null;
+  /** Recipe check (build 0008): did this recipe child really carry out its parent's recipe? With the checker's one-sentence reason. null: not checked (no recipe task, an older idea, or the check failed). */
+  liftApplied: boolean | null;
+  liftCheck: string | null;
   createdAt: string;
 };
 export type Retrial = { originality: number; feasibility: number; impact: number; reason: string; model: string; at: string };
@@ -383,6 +388,8 @@ const ideaFromRow = (r: any): Idea => ({
   liftArm: r.lift_arm ?? null,
   escape: r.escape_kw ?? null,
   retrial: r.retrial ? parseJson(r.retrial) : null,
+  liftApplied: r.lift_applied == null ? null : !!r.lift_applied,
+  liftCheck: r.lift_check ?? null,
   createdAt: r.created_at,
 });
 
@@ -431,7 +438,7 @@ export function openDb(file: string) {
   db.exec(SCHEMA);
   // Databases from before lift recipes: add the columns (SQLite has no ADD COLUMN IF NOT EXISTS).
   const ideaCols = new Set((db.prepare('PRAGMA table_info(ideas)').all() as any[]).map((c) => c.name));
-  for (const [name, type] of [['recipe_type', 'TEXT'], ['recipe', 'TEXT'], ['lift_type', 'TEXT'], ['lift_from', 'INTEGER'], ['lift_base', 'INTEGER'], ['retrial', 'TEXT'], ['lift_arm', 'TEXT'], ['escape_kw', 'TEXT']]) {
+  for (const [name, type] of [['recipe_type', 'TEXT'], ['recipe', 'TEXT'], ['lift_type', 'TEXT'], ['lift_from', 'INTEGER'], ['lift_base', 'INTEGER'], ['retrial', 'TEXT'], ['lift_arm', 'TEXT'], ['escape_kw', 'TEXT'], ['lift_applied', 'INTEGER'], ['lift_check', 'TEXT']]) {
     if (!ideaCols.has(name)) db.exec(`ALTER TABLE ideas ADD COLUMN ${name} ${type}`);
   }
 
@@ -559,6 +566,11 @@ export function openDb(file: string) {
         // A new verdict makes the old second opinion meaningless: it was about other scores.
         `UPDATE ideas SET originality = ?, feasibility = ?, impact = ?, reason = ?, recipe_type = ?, recipe = ?, retrial = NULL, judged_at = datetime('now') WHERE id = ?`,
       ).run(j.originality, j.feasibility, j.impact, j.reason, j.liftType ?? null, j.lift ?? null, id);
+      return repo.getIdea(id);
+    },
+    /** The recipe check's ruling: did this child carry out its parent's recipe? */
+    saveLiftCheck(id: number, c: { applied: boolean; reason: string }) {
+      db.prepare('UPDATE ideas SET lift_applied = ?, lift_check = ? WHERE id = ?').run(c.applied ? 1 : 0, c.reason, id);
       return repo.getIdea(id);
     },
     saveRetrial(id: number, r: Retrial) {
