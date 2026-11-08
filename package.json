@@ -1,10 +1,10 @@
 {
-  "name": "idea-generator-2",
+  "name": "idea-generator-2-self-improve",
   "version": "0.1.0",
   "private": true,
   "license": "MIT",
   "type": "module",
-  "description": "Idégeneratorn: frö, förgrena, korsa, bedöm, och låt evolutionen avla fram de bästa idéerna.",
+  "description": "Idégeneratorn that improves itself: it thinks with Claude Code, invents improvements to its own code, and gold ideas are built, tested, merged and documented by a headless Claude Code agent.",
   "engines": {
     "node": ">=25"
   },
@@ -12,7 +12,9 @@
     "start": "node server/index.ts",
     "dev": "node --watch-path=server --watch-path=public/js/score.js --watch-path=public/js/evolve.js server/index.ts",
     "test": "node --test \"test/**/*.test.ts\"",
-    "calibrate": "node tools/calibrate-judge.ts"
+    "calibrate": "node tools/calibrate-judge.ts",
+    "self:setup": "node tools/self-setup.ts",
+    "shoot": "node tools/shoot.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^1.3.0"

@@ -1,14 +1,19 @@
 // One chat interface over many providers. A model is written "provider:model",
 // e.g. "openrouter:anthropic/claude-sonnet-5.5", "anthropic:claude-opus-5-5",
-// "ollama:qwen3:8b". A bare "vendor/model" means OpenRouter.
+// "ollama:qwen3:8b", "claudecode:sonnet". A bare "vendor/model" means OpenRouter.
+//
+// claudecode runs the local Claude Code CLI headless (`claude -p`), so the
+// models come from the user's own Claude login: no API key in this app.
 //
 // App settings (keys, base URLs, models per role) live in the BROWSER's
 // localStorage and are pushed to the server, which keeps them in memory only.
 // Environment variables are a fallback for keys.
 
+import { spawn } from 'node:child_process';
+import { tmpdir } from 'node:os';
 import Anthropic from '@anthropic-ai/sdk';
 
-export type ProviderId = 'openrouter' | 'anthropic' | 'openai' | 'azure' | 'ollama' | 'mlx' | 'lmstudio' | 'custom';
+export type ProviderId = 'claudecode' | 'openrouter' | 'anthropic' | 'openai' | 'azure' | 'ollama' | 'mlx' | 'lmstudio' | 'custom';
 export type Role = 'distill' | 'expand' | 'combine' | 'judge' | 'summary' | 'research' | 'x' | 'brief';
 export const ROLES: Role[] = ['distill', 'expand', 'combine', 'judge', 'summary', 'research', 'x', 'brief'];
 
@@ -21,17 +26,20 @@ export type AppSettings = {
   maxUsdPerDay: number;
 };
 
-const SONNET = 'openrouter:anthropic/claude-sonnet-5.5';
+// This fork thinks with Claude Code: every role except the X scout (only
+// OpenRouter's Grok can search X) runs on the local `claude` CLI.
+const SONNET = 'claudecode:sonnet';
 export const DEFAULT_APP_SETTINGS: AppSettings = {
   keys: {},
   baseUrls: {
+    claudecode: 'claude',
     ollama: 'http://localhost:11434',
     mlx: 'http://localhost:8080/v1',
     lmstudio: 'http://localhost:1234/v1',
     azure: '',
     custom: '',
   },
-  // Sonnet 5.5: calibrated judge, idiomatic Swedish. Grok: the only route that can search X.
+  // Sonnet: calibrated judge (run `npm run calibrate -- --model claudecode:sonnet` after changes).
   models: { distill: SONNET, expand: SONNET, combine: SONNET, judge: SONNET, summary: SONNET, research: SONNET, x: 'openrouter:x-ai/grok-4.3', brief: SONNET },
   projectsRoot: '~/Projekt/idea-projects',
   maxUsdPerDay: 5,
@@ -39,7 +47,7 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
 
 type ProviderDef = {
   label: string;
-  type: 'openai' | 'anthropic' | 'ollama';
+  type: 'openai' | 'anthropic' | 'ollama' | 'cli';
   base?: string;
   env?: string;
   needsKey: boolean;
@@ -50,6 +58,10 @@ type ProviderDef = {
 };
 
 export const PROVIDERS: Record<ProviderId, ProviderDef> = {
+  claudecode: {
+    label: 'Claude Code (headless, your Claude login)', type: 'cli', needsKey: false, local: true,
+    note: 'Runs the local `claude` CLI with no tools and no settings, one process per call (about 2–5 s). Model = an alias (sonnet, opus, haiku) or a full ID. The address field is the command to run. Cost is Claude Code\'s own estimate at list price.',
+  },
   openrouter: { label: 'OpenRouter', type: 'openai', base: 'https://openrouter.ai/api/v1', env: 'OPENROUTER_API_KEY', needsKey: true, search: true },
   anthropic: { label: 'Anthropic', type: 'anthropic', env: 'ANTHROPIC_API_KEY', needsKey: true },
   openai: { label: 'OpenAI', type: 'openai', base: 'https://api.openai.com/v1', env: 'OPENAI_API_KEY', needsKey: true },
@@ -291,6 +303,72 @@ async function anthropicChat(settings: AppSettings, model: string, r: ChatReques
   throw new ProviderError('provider_error', `Anthropic ${model} failed`);
 }
 
+// ---------------------------------------------------------------- Claude Code (headless CLI)
+
+/** What we pass to `claude -p`: no tools, no settings or MCP, a fixed system prompt, structured output. */
+export function claudeCodeArgs(model: string, r: ChatRequest) {
+  return [
+    '-p', '--output-format', 'json', '--model', model,
+    '--tools', '', '--no-session-persistence', '--setting-sources', '', '--strict-mcp-config', '--disable-slash-commands',
+    '--system-prompt', r.system,
+    '--json-schema', JSON.stringify(r.schema),
+  ];
+}
+
+/** Run a command, feed stdin, collect stdout and stderr. Rejects only if it cannot start. */
+export function run(cmd: string, args: string[], o: { input?: string; cwd?: string; timeoutMs?: number; env?: NodeJS.ProcessEnv } = {}) {
+  return new Promise<{ code: number | null; stdout: string; stderr: string; timedOut: boolean }>((resolve, reject) => {
+    const child = spawn(cmd, args, { cwd: o.cwd, env: o.env ?? process.env, stdio: ['pipe', 'pipe', 'pipe'] });
+    let stdout = '', stderr = '', timedOut = false;
+    const timer = o.timeoutMs ? setTimeout(() => { timedOut = true; child.kill('SIGTERM'); }, o.timeoutMs) : null;
+    child.stdout.on('data', (d) => (stdout += d));
+    child.stderr.on('data', (d) => (stderr += d));
+    child.on('error', (e) => { if (timer) clearTimeout(timer); reject(e); });
+    child.on('close', (code) => { if (timer) clearTimeout(timer); resolve({ code, stdout, stderr, timedOut }); });
+    child.stdin.on('error', () => {}); // a child that exits early must not crash us
+    child.stdin.end(o.input ?? '');
+  });
+}
+
+async function claudeCodeChat(settings: AppSettings, model: string, r: ChatRequest): Promise<ChatResult> {
+  if (r.plugins) throw new ProviderError('no_search', 'Claude Code cannot search X; use openrouter:x-ai/grok-4.3 for the X scout');
+  const cmd = baseFor(settings, 'claudecode') || 'claude';
+  let lastError = '';
+  for (let attempt = 0; attempt < 2; attempt++) {
+    let out;
+    try {
+      // A neutral folder, so no project CLAUDE.md leaks into the prompt.
+      out = await run(cmd, claudeCodeArgs(model, r), { input: r.user, cwd: tmpdir(), timeoutMs: r.plugins ? 300_000 : 180_000 });
+    } catch (e: any) {
+      throw new ProviderError('unreachable', `Claude Code: cannot run "${cmd}" (${e?.code ?? e?.message}). Is Claude Code installed and logged in?`);
+    }
+    if (out.timedOut) { lastError = `Claude Code ${model}: timed out`; continue; }
+    let data: any;
+    try {
+      data = JSON.parse(out.stdout);
+    } catch {
+      lastError = `Claude Code exit ${out.code}: ${(out.stderr || out.stdout).trim().slice(0, 300)}`;
+      if (/log ?in|auth|credential/i.test(lastError)) throw new ProviderError('bad_key', `${lastError} (run \`claude\` once and log in)`);
+      continue;
+    }
+    const costUsd = Number(data.total_cost_usd) || 0;
+    if (data.is_error) {
+      lastError = `Claude Code ${model}: ${String(data.result ?? data.subtype ?? 'error').slice(0, 300)}`;
+      if (/rate limit|usage limit|overloaded/i.test(lastError)) throw new ProviderError('rate_limited', lastError);
+      continue;
+    }
+    try {
+      const value = data.structured_output ?? extractJson(String(data.result ?? ''));
+      return { value, costUsd };
+    } catch (e: any) {
+      lastError = `Claude Code ${model}: ${e.message}`;
+    }
+  }
+  throw new ProviderError('provider_error', lastError || `Claude Code ${model} failed`);
+}
+
+export const CLAUDE_CODE_MODELS = ['sonnet', 'opus', 'haiku', 'fable', 'claude-sonnet-5-5', 'claude-opus-5-5', 'claude-haiku-5-5', 'claude-fable-5-1'];
+
 /** A chat function that routes every request by its "provider:model" string. */
 export function makeChat(getSettings: () => AppSettings): ChatFn {
   return async (r) => {
@@ -298,6 +376,7 @@ export function makeChat(getSettings: () => AppSettings): ChatFn {
     const { provider, model } = parseModel(r.model);
     if (!model) throw new ProviderError('bad_model', `No model given in "${r.model}"`);
     const def = PROVIDERS[provider];
+    if (def.type === 'cli') return claudeCodeChat(settings, model, r);
     if (def.type === 'anthropic') return anthropicChat(settings, model, r);
     if (def.type === 'ollama') return ollamaChat(settings, model, r);
     return openaiChat(settings, provider, model, r);
@@ -319,6 +398,13 @@ export async function listModels(settings: AppSettings, p: ProviderId): Promise<
     }
   };
   try {
+    if (p === 'claudecode') {
+      // A connection test that costs nothing: is the CLI there, and which version?
+      const cmd = base || 'claude';
+      const out = await run(cmd, ['--version'], { timeoutMs: 15_000 });
+      if (out.code !== 0) throw new ProviderError('unreachable', `Claude Code: "${cmd} --version" failed: ${out.stderr.trim().slice(0, 200)}`);
+      return CLAUDE_CODE_MODELS;
+    }
     if (p === 'anthropic') {
       const out: string[] = [];
       for await (const m of anthropicClient(key).models.list()) out.push(m.id);

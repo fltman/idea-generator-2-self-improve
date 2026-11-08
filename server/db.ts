@@ -90,6 +90,31 @@ CREATE TABLE IF NOT EXISTS spend (
   calls INTEGER NOT NULL DEFAULT 0,
   PRIMARY KEY (board_id, day)
 );
+-- Self-improvement: gold ideas that Claude Code builds into this app's own code.
+-- seq is the journal number (journal/0001-slug/), stable even if the DB is reset.
+CREATE TABLE IF NOT EXISTS builds (
+  id INTEGER PRIMARY KEY,
+  idea_id INTEGER REFERENCES ideas(id) ON DELETE SET NULL,
+  board_id INTEGER,
+  seq INTEGER,
+  title TEXT NOT NULL,
+  pitch TEXT NOT NULL DEFAULT '',
+  status TEXT NOT NULL DEFAULT 'queued',
+  phase TEXT,
+  trigger TEXT NOT NULL DEFAULT 'jury',
+  branch TEXT,
+  commit_sha TEXT,
+  journal_dir TEXT,
+  summary TEXT,
+  error TEXT,
+  tests TEXT,
+  cost_usd REAL NOT NULL DEFAULT 0,
+  session_id TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  started_at TEXT,
+  finished_at TEXT
+);
+CREATE INDEX IF NOT EXISTS builds_idea ON builds(idea_id);
 `;
 
 // Templates for a board's creation flow. The prompts are in English; the
@@ -123,6 +148,15 @@ export const DEFAULT_TEMPLATES = [
       'Combine the two ideas into ONE solution where the sustainability gain of one multiplies the other. Be concrete about what changes.',
   },
   {
+    name: 'Självförbättraren · Self-improver',
+    system:
+      'You are a product engineer and the lead developer of Idea Generator 2, the very app you are running inside. You improve it as an idea generator: better ideas, sharper judging, smarter evolution, clearer insight for the people watching. You think in concrete changes to its code that a coding agent can build and verify in one session.',
+    expand:
+      'Generate 3 improvements to the app that grow out of this one. Make them differ: one that sharpens it into the smallest buildable change, one that borrows a mechanism from another field (evolutionary biology, editing, games, science), and one bolder change to how the app generates or judges ideas. Each must name what changes in the app and how a user would see it.',
+    combine:
+      'Fuse the two improvements into ONE change to the app where each part makes the other work better. Name the concrete mechanism and what the user sees; it must still be buildable in one session.',
+  },
+  {
     name: 'Galningen · Wild card',
     system:
       'You are a playful, fearless provocateur. You turn assumptions upside down and find the idea nobody dares say out loud, but every idea must still be explainable in two sentences and possible to actually try.',
@@ -149,6 +183,16 @@ export type BoardConfig = {
   autopilotSeconds: number;
   rate: { stepsPerHour: number; usdPerDay: number };
   autoProjectOnGold: boolean;
+  /**
+   * Self-improvement: ideas on this board are changes to this app. Prompts get
+   * the app's current feature list, and gold ideas go to the Claude Code
+   * builder (server/builder.ts) instead of becoming project folders.
+   */
+  selfImprove: boolean;
+  /** Most builds the jury may start per local day on this board (hand-started builds are not counted). */
+  buildsPerDay: number;
+  /** Claude Code model for the builder: an alias (opus, sonnet) or a full ID. */
+  buildModel: string;
   /** Per-role model overrides ("provider:model"); empty = the app-wide setting. */
   models: Partial<Record<(typeof MODEL_ROLES)[number], string>>;
 };
@@ -164,6 +208,9 @@ export function defaultConfig(template = DEFAULT_TEMPLATES[0]): BoardConfig {
     autopilotSeconds: 10,
     rate: { stepsPerHour: 60, usdPerDay: 1 },
     autoProjectOnGold: true,
+    selfImprove: false,
+    buildsPerDay: 4,
+    buildModel: 'opus',
     models: {},
   };
 }
@@ -210,6 +257,10 @@ export function mergeConfig(base: BoardConfig, raw: any): BoardConfig {
       usdPerDay: Number.isFinite(usd) ? Math.min(1000, Math.max(0, Math.round(usd * 100) / 100)) : base.rate.usdPerDay,
     },
     autoProjectOnGold: b(r.autoProjectOnGold, base.autoProjectOnGold),
+    selfImprove: b(r.selfImprove, base.selfImprove),
+    buildsPerDay: Number.isFinite(Number(r.buildsPerDay)) && r.buildsPerDay !== null && r.buildsPerDay !== ''
+      ? Math.min(50, Math.max(0, Math.round(Number(r.buildsPerDay)))) : base.buildsPerDay,
+    buildModel: /^[a-z0-9.\-\[\]]{2,60}$/i.test(String(r.buildModel ?? '').trim()) ? String(r.buildModel).trim() : base.buildModel,
     models,
   };
 }
@@ -254,6 +305,23 @@ export type BoardSummary = {
   lang: string;
   createdAt: string;
 };
+export type BuildStatus = 'queued' | 'running' | 'merged' | 'ready' | 'failed' | 'declined' | 'interrupted' | 'cancelled';
+export type Build = {
+  id: number; ideaId: number | null; boardId: number | null; seq: number | null; title: string; pitch: string;
+  status: BuildStatus; phase: string | null; trigger: 'jury' | 'hand'; branch: string | null; commit: string | null;
+  journalDir: string | null; summary: string | null; error: string | null; tests: string | null; costUsd: number;
+  sessionId: string | null; createdAt: string; startedAt: string | null; finishedAt: string | null;
+};
+const buildFromRow = (r: any): Build => ({
+  id: r.id, ideaId: r.idea_id, boardId: r.board_id, seq: r.seq, title: r.title, pitch: r.pitch, status: r.status, phase: r.phase,
+  trigger: r.trigger, branch: r.branch, commit: r.commit_sha, journalDir: r.journal_dir, summary: r.summary, error: r.error,
+  tests: r.tests, costUsd: r.cost_usd, sessionId: r.session_id, createdAt: r.created_at, startedAt: r.started_at, finishedAt: r.finished_at,
+});
+const BUILD_COLS: Record<string, string> = {
+  seq: 'seq', status: 'status', phase: 'phase', branch: 'branch', commit: 'commit_sha', journalDir: 'journal_dir', summary: 'summary',
+  error: 'error', tests: 'tests', costUsd: 'cost_usd', sessionId: 'session_id', startedAt: 'started_at', finishedAt: 'finished_at',
+};
+
 export type Template = { id: number; name: string; system: string; expand: string; combine: string; sort: number };
 export type Lead = {
   id: number; boardId: number; source: 'x' | 'research'; title: string; summary: string; hook: string;
@@ -335,6 +403,12 @@ export function openDb(file: string) {
   if ((db.prepare('SELECT COUNT(*) AS n FROM templates').get() as any).n === 0) {
     const ins = db.prepare('INSERT INTO templates (name, system, expand, combine, sort) VALUES (?, ?, ?, ?, ?)');
     DEFAULT_TEMPLATES.forEach((t, i) => ins.run(t.name, t.system, t.expand, t.combine, i));
+  } else {
+    // Databases from before the self-improvement loop get its template too.
+    const self = DEFAULT_TEMPLATES.find((t) => t.name.startsWith('Självförbättraren'))!;
+    if (!db.prepare('SELECT 1 FROM templates WHERE name = ?').get(self.name)) {
+      db.prepare('INSERT INTO templates (name, system, expand, combine, sort) VALUES (?, ?, ?, ?, ?)').run(self.name, self.system, self.expand, self.combine, 99);
+    }
   }
 
   const tx = <T>(fn: () => T): T => {
@@ -706,6 +780,45 @@ export function openDb(file: string) {
     },
     saveSynthesis(days: number, lang: string, content: object) {
       db.prepare('INSERT INTO reports (days, lang, content) VALUES (?, ?, ?)').run(days, lang, JSON.stringify(content));
+    },
+
+    // ---- builds (self-improvement)
+    createBuild(b: { ideaId: number; boardId: number; title: string; pitch: string; trigger: 'jury' | 'hand' }): Build {
+      const { lastInsertRowid } = db
+        .prepare('INSERT INTO builds (idea_id, board_id, title, pitch, trigger) VALUES (?, ?, ?, ?, ?)')
+        .run(b.ideaId, b.boardId, b.title, b.pitch, b.trigger);
+      return repo.getBuild(Number(lastInsertRowid))!;
+    },
+    getBuild(id: number): Build | null {
+      const r = db.prepare('SELECT * FROM builds WHERE id = ?').get(id);
+      return r ? buildFromRow(r) : null;
+    },
+    updateBuild(id: number, patch: Partial<Build>): Build | null {
+      const keys = Object.keys(patch).filter((k) => k in BUILD_COLS);
+      if (keys.length) {
+        db.prepare(`UPDATE builds SET ${keys.map((k) => `${BUILD_COLS[k]} = ?`).join(', ')} WHERE id = ?`)
+          .run(...keys.map((k) => (patch as any)[k] ?? null), id);
+      }
+      return repo.getBuild(id);
+    },
+    listBuilds(limit = 100): Build[] {
+      return db.prepare('SELECT * FROM builds ORDER BY id DESC LIMIT ?').all(limit).map(buildFromRow);
+    },
+    buildsWithStatus(...statuses: string[]): Build[] {
+      return db.prepare(`SELECT * FROM builds WHERE status IN (${statuses.map(() => '?').join(',')}) ORDER BY id`).all(...statuses).map(buildFromRow);
+    },
+    latestBuildFor(ideaId: number): Build | null {
+      const r = db.prepare('SELECT * FROM builds WHERE idea_id = ? ORDER BY id DESC LIMIT 1').get(ideaId);
+      return r ? buildFromRow(r) : null;
+    },
+    /** Builds the jury started on a board today (local day): the daily cap counts these. */
+    juryBuildsToday(boardId: number, day = localDay()): number {
+      const rows = db.prepare("SELECT created_at FROM builds WHERE board_id = ? AND trigger = 'jury'").all(boardId) as any[];
+      return rows.filter((r) => localDay(new Date(r.created_at.replace(' ', 'T') + 'Z')) === day).length;
+    },
+    /** A consistent copy of the whole database (for screenshots and boot checks in a build's worktree). */
+    snapshot(path: string) {
+      db.prepare('VACUUM INTO ?').run(path);
     },
 
     // ---- spend ledger (per board, per local day)

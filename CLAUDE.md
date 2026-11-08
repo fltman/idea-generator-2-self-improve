@@ -1,16 +1,21 @@
-# CLAUDE.md – Idea Generator 2
+# CLAUDE.md – Idea Generator 2, self-improving
 
-Node 25 runs the TypeScript server directly; the frontend is vanilla ES modules. There is no build step. Port 8300, loopback only.
+Node 25 runs the TypeScript server directly; the frontend is vanilla ES modules. There is no build step. Port 8301, loopback only.
+
+This fork improves itself. A self-improvement board generates changes to this app, and gold ideas are built in by a headless Claude Code agent (`server/builder.ts`). **If you are that agent, the prompt tells you your build number and journal folder; follow it and the rules below.**
 
 ## Commands
 
-- `npm start` – server on http://localhost:8300 (`PORT`, `HOST`, `DB_FILE` override)
-- `npm test` – 50 tests (`node --test`), fake LLM and fake provider servers, no network
+- `npm run dev` – server on http://localhost:8301 that restarts when `server/` changes. A merged build relies on this. (`npm start` does not restart.) `PORT`, `HOST` and `DB_FILE` override.
+- `npm test` – 63 tests (`node --test`), with a fake LLM, fake provider servers, a fake `claude` CLI and a fake build agent. No network.
+- `npm run self:setup` – creates the self-improvement board on a running server.
+- `node tools/shoot.ts --out file.png [--board N] [--eval js]…` – boots this checkout's server against a copy of `data/ideas.db` (autopilot and builder off), opens headless Chrome, and saves a PNG. `--help` lists the options.
 - `npm run calibrate [-- --model provider:model]` – real judge against weak and strong reference ideas. It costs money. **Re-run it whenever the judge's prompt, schema or model changes.**
 
 ## Layout
 
 - `server/providers.ts` – `provider:model` routing.
+  - `claudecode` runs `claude -p --output-format json --json-schema … --system-prompt …`, with no tools and no settings, in a temp folder. The user text goes on stdin.
   - Ollama uses the native `/api/chat` with `think:false` and `format:schema`.
   - Anthropic uses the official SDK with `output_config.format`.
   - Everything else is OpenAI-compatible.
@@ -19,6 +24,11 @@ Node 25 runs the TypeScript server directly; the frontend is vanilla ES modules.
 - `server/autopilot.ts` – the scheduler and the pure `rateCheck()`.
 - `server/leads.ts` – the X and research scouts.
 - `server/project.ts` – Claude Code folders.
+- `server/builder.ts` – the self-improvement builder:
+  - queue, worktree, the agent run (stream-json), verification, merge and the journal
+  - `selfContext()`: the README feature list plus the merged builds, added to every prompt on self-improvement boards
+- `journal/` – one folder per build (`NNNN-slug/`: the agent's README.md, screenshots, build.json) and `INDEX.md`. Committed and public.
+- `data/worktrees/`, `data/builds/` – live worktrees, and each build's log.txt and full transcript.jsonl. Gitignored.
 - `server/db.ts` – SQLite (`node:sqlite`), plus `report()` and `dashboard()` queries.
 - `server/app.ts` – HTTP, SSE (`/api/boards/:id/events`) and Markdown exports.
 - `public/js/score.js` and `public/js/evolve.js` – pure modules shared by the server, browser and tests.
@@ -34,11 +44,22 @@ Node 25 runs the TypeScript server directly; the frontend is vanilla ES modules.
 - **OpenRouter: send `reasoning:{enabled:false}`** and retry without it on a 400 that mentions reasoning (some models insist on reasoning).
 - **X scout:** a lead is kept only if its URL is in the search engine's `url_citation` annotations. Never trust a URL the model wrote. Only OpenRouter (Grok) can search X.
 - **App settings live in the browser's localStorage.** The server holds them in memory, and the SSE `hello` tells the browser to push them again after a restart. Board configuration lives in the DB.
-- **Dollar limits only see providers that report cost** (OpenRouter `usage.cost`, Anthropic via the price table). A limit of 0 means free models only.
+- **Dollar limits only see providers that report cost** (OpenRouter `usage.cost`, Anthropic via the price table, Claude Code `total_cost_usd`). A limit of 0 means free models only.
 - **Text goes into the DOM as text nodes, never `innerHTML`** (`dom.js`). Ideas are written by models and by visitors.
+- **Builds are verified by the server, never by the agent's word.** The builder re-runs `npm test` and boots `server/index.ts` from the worktree, and merges with `--no-ff` only after both pass. The journal is committed on the branch before the merge, because the merge restarts the server under `npm run dev`; nothing that matters may come after it.
+- **The build agent is scoped.** It runs `--permission-mode acceptEdits` with an allowlist (`AGENT_ALLOWED` in builder.ts): edits, `npm test`, `node tools/shoot.ts`, and local git add/commit/diff/log. It may not push, checkout, reset, merge, rm, curl, `npm install`, or use the web. Never run it with `--dangerously-skip-permissions`.
+- **No new npm dependencies.** The worktree's `node_modules` is a symlink to the main one.
+- **Anything started inside a worktree gets `IDEAGEN_NO_AUTOPILOT=1 IDEAGEN_NO_BUILDER=1`** and never the live `PORT` or `DB_FILE`.
 - **Project folders never overwrite.** They are created with a non-recursive `mkdir`, and a taken name gets `-2`.
 
 ## Measured
+
+- **`claudecode:sonnet` judge** (2026-11-08):
+  - weak ideas: mean 4.9, max 7 (no medal)
+  - strong ideas: mean 9.5, 0 of 10 gold
+  - run-to-run spread 1
+  - $0.13 for the 22 calls (Claude Code's list-price estimate)
+  - about 2–5 s per call
 
 - **Sonnet 5.5 judge** (2026-11-02):
   - weak ideas: mean 4.7, max 5

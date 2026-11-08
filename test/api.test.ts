@@ -354,9 +354,10 @@ test('links: fetched and distilled; unreadable links are an error, not a silent 
   assert.equal(repo.listIdeas(board.id).length, 1);
 });
 
-test('templates: four defaults, editable, the last one stays', async () => {
+test('templates: five defaults (one is the self-improver), editable, the last one stays', async () => {
   const { data } = await api('GET', '/api/templates');
-  assert.equal(data.templates.length, 4);
+  assert.equal(data.templates.length, 5);
+  assert.ok(data.templates.some((t: any) => t.name.startsWith('Självförbättraren')));
   assert.equal((await api('POST', '/api/templates', { name: 'X' })).status, 400);
   const { data: n } = await api('POST', '/api/templates', { name: 'Ny', system: 's', expand: 'e', combine: 'c' });
   const board = await newBoard({ templateId: n.template.id });

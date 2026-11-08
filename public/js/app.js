@@ -9,12 +9,14 @@ import { medal, scoreSum, fitness, CRITERIA } from './score.js';
 import { evolutionStats } from './evolve.js';
 import { openDashboard } from './dashboard.js';
 import { openReport } from './report.js';
+import { initBuilds, onBuildEvent, buildFor, startBuild, openBuilds, buildIcon, formatSeq } from './builds.js';
 
 const MEDAL_ICON = ['–', '🥉', '🥈', '🥇'];
 const S = {
   boards: [], board: null, ideas: new Map(), edges: [], leads: [], spinoffs: [], judging: new Set(),
   autopilot: { state: 'manual' }, spentToday: 0, selected: null, templates: [], providers: null,
   settings: loadSettings(), stopFollow: null, createAt: null, leadsTab: 'x', refreshing: {}, exhibit: false,
+  version: null,
 };
 const fail = (e) => toast(errorText(e), 'error', 8000);
 /** Built-in template names are bilingual ("Uppfinnaren · Inventor"); show the half that matches the UI. */
@@ -101,6 +103,12 @@ function onEvent(e) {
     case 'hello':
       S.autopilot = e.autopilot;
       renderAutopilot();
+      // A different commit than the one this page came from: a build was merged and the server restarted.
+      if (e.version && S.version && e.version !== S.version) {
+        toast(t('newVersion', { v: e.version }), 'good');
+        setTimeout(() => location.reload(), 1500);
+      }
+      S.version ??= e.version;
       // The server restarted and lost the settings it only keeps in memory: hand them over again.
       if (!e.settingsReceived) pushSettings(S.settings).then((p) => (S.providers = p)).catch(fail);
       break;
@@ -156,6 +164,10 @@ function onEvent(e) {
     case 'spinoff':
       S.spinoffs.push({ ideaId: e.ideaId, boardId: e.boardId, title: e.title });
       renderPanelSoon();
+      break;
+    case 'build':
+    case 'buildLog':
+      onBuildEvent(e);
       break;
     case 'error':
       fail(e);
@@ -414,7 +426,7 @@ function renderIdea(idea) {
       h('button', { class: 'btn', title: t('announceHint'), onclick: () => announceDialog(idea) }, `📣 ${t('announce')}`),
       h('button', { class: 'btn', title: t('spinoffHint'), onclick: () => spinoff(idea) }, `⤴ ${t('spinoff')}`),
     ),
-    h('div', { class: 'project' },
+    S.board?.config.selfImprove ? buildBlock(idea) : h('div', { class: 'project' },
       idea.projectPath
         ? [
             h('div', { class: 'path', title: idea.projectPath }, `📁 ${idea.projectPath}`),
@@ -436,6 +448,18 @@ function renderIdea(idea) {
         try { await api('DELETE', `/api/ideas/${idea.id}`); } catch (e) { fail(e); }
       },
     }, t('deleteIdea')),
+  );
+}
+
+/** On a self-improvement board: the idea's build, or a button that hands it to Claude Code. */
+function buildBlock(idea) {
+  const b = buildFor(idea.id);
+  const again = !b || ['failed', 'declined', 'interrupted', 'cancelled'].includes(b.status);
+  return h('div', { class: 'project build-block' },
+    b ? h('button', { class: 'linkish', onclick: openBuilds },
+      `${buildIcon(b.status)} ${t('buildWord')} ${b.seq ? formatSeq(b.seq) : ''} · ${b.status === 'running' ? t(`phase_${b.phase ?? 'preparing'}`) : t(`bstatus_${b.status}`)}`) : null,
+    b?.summary ? h('p', { class: 'small muted' }, b.summary) : null,
+    again ? h('button', { class: 'btn cc', title: t('buildHint'), onclick: () => startBuild(idea.id) }, `🔨 ${b ? t('buildAgain') : t('buildIt')}`) : null,
   );
 }
 
@@ -634,6 +658,9 @@ async function boardSettingsDialog() {
   const tplSel = h('select', {}, S.templates.map((x) => h('option', { value: x.id }, localName(x.name))));
   const guidance = area(c.judgeGuidance, 2, { placeholder: t('judgeGuidancePh') });
   const autoProj = h('input', { type: 'checkbox', checked: c.autoProjectOnGold });
+  const selfOn = h('input', { type: 'checkbox', checked: c.selfImprove });
+  const buildsPerDay = inp(c.buildsPerDay, { type: 'number', min: 0, max: 50 });
+  const buildModel = inp(c.buildModel, { placeholder: 'opus' });
   const xOn = h('input', { type: 'checkbox', checked: c.researchers.x.enabled }), xFocus = inp(c.researchers.x.focus, { placeholder: t('focusPh') });
   const rOn = h('input', { type: 'checkbox', checked: c.researchers.research.enabled }), rFocus = inp(c.researchers.research.focus, { placeholder: t('focusPh') });
   const mode = h('select', {}, h('option', { value: 'manual', selected: c.mode === 'manual' }, t('manual')), h('option', { value: 'auto', selected: c.mode === 'auto' }, t('auto')));
@@ -667,6 +694,10 @@ async function boardSettingsDialog() {
     ),
     h('fieldset', {}, h('legend', {}, t('jury')), field(t('judgeGuidance'), guidance),
       h('label', { class: 'check' }, autoProj, t('autoProject'))),
+    h('fieldset', {}, h('legend', {}, t('selfImprove')),
+      h('label', { class: 'check' }, selfOn, t('selfImproveOn')),
+      h('div', { class: 'grid2' }, field(t('buildsPerDay'), buildsPerDay), field(t('buildModel'), buildModel)),
+      h('small', { class: 'muted' }, t('selfImproveNote'))),
     h('fieldset', {}, h('legend', {}, t('researchers')),
       h('label', { class: 'check' }, xOn, t('xScout')), field(t('focus'), xFocus),
       h('label', { class: 'check' }, rOn, t('researchScout')), field(t('focus'), rFocus)),
@@ -699,6 +730,7 @@ async function boardSettingsDialog() {
           config: {
             lang: lang.value, flowName: flowName.value, flow: { system: sys.value, expand: exp.value, combine: comb.value },
             judgeGuidance: guidance.value, autoProjectOnGold: autoProj.checked,
+            selfImprove: selfOn.checked, buildsPerDay: Number(buildsPerDay.value), buildModel: buildModel.value,
             researchers: { x: { enabled: xOn.checked, focus: xFocus.value }, research: { enabled: rOn.checked, focus: rFocus.value } },
             mode: mode.value, autopilotSeconds: Number(pace.value), rate: { stepsPerHour: Number(sph.value), usdPerDay: Number(usd.value) },
             models: Object.fromEntries(ROLES.map((r) => [r, models[r].value])),
@@ -711,10 +743,10 @@ async function boardSettingsDialog() {
 }
 
 const PROVIDER_LABELS = {
-  openrouter: 'OpenRouter', anthropic: 'Anthropic', openai: 'OpenAI',
+  claudecode: 'Claude Code (headless)', openrouter: 'OpenRouter', anthropic: 'Anthropic', openai: 'OpenAI',
   azure: 'Azure OpenAI / Microsoft Foundry (Copilot models)', ollama: 'Ollama', mlx: 'MLX (mlx_lm.server)', lmstudio: 'LM Studio', custom: 'OpenAI-compatible',
 };
-const HAS_URL = ['ollama', 'mlx', 'lmstudio', 'azure', 'custom'];
+const HAS_URL = ['claudecode', 'ollama', 'mlx', 'lmstudio', 'azure', 'custom'];
 const HAS_KEY = ['openrouter', 'anthropic', 'openai', 'azure', 'custom'];
 const modelCatalog = new Map();
 
@@ -731,7 +763,7 @@ function appSettingsDialog() {
     const st = status.get(p);
     const result = h('span', { class: 'small muted' });
     keys[p] = HAS_KEY.includes(p) ? h('input', { type: 'password', value: s.keys[p] ?? '', placeholder: t('apiKey'), autocomplete: 'off' }) : null;
-    urls[p] = HAS_URL.includes(p) ? h('input', { value: s.baseUrls[p] ?? '', placeholder: t('baseUrl') }) : null;
+    urls[p] = HAS_URL.includes(p) ? h('input', { value: s.baseUrls[p] ?? '', placeholder: p === 'claudecode' ? t('ccCommand') : t('baseUrl') }) : null;
     return h('div', { class: 'provider' },
       h('div', { class: 'row space' },
         h('strong', {}, PROVIDER_LABELS[p]),
@@ -941,6 +973,7 @@ async function main() {
     fail(e);
   }
   await loadBoards();
+  await initBuilds({ onChange: () => renderPanelSoon(), onOpenIdea });
   const last = Number(localStorage.getItem('ideagen.board'));
   const pick = S.boards.find((b) => b.id === last) ?? S.boards[0];
   if (pick) await openBoard(pick.id);

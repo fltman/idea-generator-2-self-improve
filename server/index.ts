@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import { createServer } from 'node:http';
 import { mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -6,10 +7,12 @@ import { openDb } from './db.ts';
 import { DEFAULT_APP_SETTINGS, makeChat, type AppSettings } from './providers.ts';
 import { createEngine } from './engine.ts';
 import { createAutopilot } from './autopilot.ts';
+import { createBuilder, selfContext, type Builder } from './builder.ts';
 import { createHandler, type Runtime } from './app.ts';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
-const PORT = Number(process.env.PORT ?? 8300);
+// 8301, not the original app's 8300: both can run, and each has its own browser settings.
+const PORT = Number(process.env.PORT ?? 8301);
 // Local first: loopback only. There is no login, and API keys pass through here.
 const HOST = process.env.HOST ?? '127.0.0.1';
 
@@ -29,11 +32,33 @@ const runtime: Runtime = {
   received: () => received,
 };
 
-const engine = createEngine({ repo, chat: makeChat(runtime.get), settings: runtime.get });
-const autopilot = createAutopilot({ repo, engine, settings: runtime.get }).start();
+// Screenshots and boot checks start this server inside a build's worktree: no autopilot, no builder there.
+const off = (name: string) => process.env[name] === '1';
+let version = '';
+try {
+  version = execFileSync('git', ['rev-parse', '--short', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim();
+} catch {
+  /* not a git checkout */
+}
 
-createServer(createHandler({ repo, engine, autopilot, runtime, publicDir: join(root, 'public') })).listen(PORT, HOST, () => {
-  console.log(`Idégeneratorn: http://localhost:${PORT}`);
+let builder: Builder | null = null;
+const engine = createEngine({
+  repo, chat: makeChat(runtime.get), settings: runtime.get,
+  onGold: (idea, by) => builder?.enqueue(idea.id, by),
+  selfContext: () => selfContext(root),
+});
+if (!off('IDEAGEN_NO_BUILDER')) {
+  builder = createBuilder({
+    repo, root, emit: (e) => engine.bus.emitAll(e),
+    push: process.env.BUILD_PUSH === '1',
+    maxUsdPerBuild: Number(process.env.BUILD_MAX_USD) || undefined,
+  }).start();
+}
+const autopilot = createAutopilot({ repo, engine, settings: runtime.get });
+if (!off('IDEAGEN_NO_AUTOPILOT')) autopilot.start();
+
+createServer(createHandler({ repo, engine, autopilot, runtime, publicDir: join(root, 'public'), builder, journalRoot: root, version })).listen(PORT, HOST, () => {
+  console.log(`Idégeneratorn: http://localhost:${PORT}${version ? ` (${version})` : ''}`);
   const auto = repo.listBoards().filter((b) => b.config.mode === 'auto');
   if (auto.length) console.log(`Autopilot on for ${auto.length} board(s); they need keys from the browser or the environment.`);
 });

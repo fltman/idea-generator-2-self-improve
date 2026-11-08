@@ -6,12 +6,14 @@ import { api } from './api.js';
 
 const KEY = 'ideagen.settings.v1';
 export const ROLES = ['distill', 'expand', 'combine', 'judge', 'summary', 'research', 'x', 'brief'];
-export const PROVIDER_IDS = ['openrouter', 'anthropic', 'openai', 'azure', 'ollama', 'mlx', 'lmstudio', 'custom'];
+export const PROVIDER_IDS = ['claudecode', 'openrouter', 'anthropic', 'openai', 'azure', 'ollama', 'mlx', 'lmstudio', 'custom'];
 
-const SONNET = 'openrouter:anthropic/claude-sonnet-5.5';
+// This fork thinks with Claude Code (the local `claude` CLI, your own login).
+// Only the X scout stays on OpenRouter: Grok is the only route that can search X.
+const SONNET = 'claudecode:sonnet';
 export const DEFAULTS = {
   keys: {},
-  baseUrls: { ollama: 'http://localhost:11434', mlx: 'http://localhost:8080/v1', lmstudio: 'http://localhost:1234/v1', azure: '', custom: '' },
+  baseUrls: { claudecode: 'claude', ollama: 'http://localhost:11434', mlx: 'http://localhost:8080/v1', lmstudio: 'http://localhost:1234/v1', azure: '', custom: '' },
   models: { distill: SONNET, expand: SONNET, combine: SONNET, judge: SONNET, summary: SONNET, research: SONNET, x: 'openrouter:x-ai/grok-4.3', brief: SONNET },
   projectsRoot: '~/Projekt/idea-projects',
   maxUsdPerDay: 5,

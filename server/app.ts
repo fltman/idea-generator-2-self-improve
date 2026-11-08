@@ -3,11 +3,13 @@
 // in-memory database and a fake LLM.
 
 import type { IncomingMessage, ServerResponse } from 'node:http';
+import { readdirSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { extname, join, resolve, sep } from 'node:path';
 import type { Repo, Idea, Board } from './db.ts';
 import { AppError, type Engine } from './engine.ts';
 import type { Autopilot } from './autopilot.ts';
+import type { Builder } from './builder.ts';
 import { PROVIDERS, keySource, listModels, mergeAppSettings, type AppSettings, type ProviderId } from './providers.ts';
 import { fitness, medal, scoreSum } from '../public/js/score.js';
 
@@ -18,7 +20,13 @@ export type Runtime = {
   received(): boolean;
 };
 
-type Deps = { repo: Repo; engine: Engine; autopilot: Autopilot; runtime: Runtime; publicDir: string };
+type Deps = {
+  repo: Repo; engine: Engine; autopilot: Autopilot; runtime: Runtime; publicDir: string;
+  /** Self-improvement: the builder, and the folder whose journal/ is served at /journal/. */
+  builder?: Builder | null; journalRoot?: string;
+  /** The git commit the server runs; the browser reloads when it changes (a build was merged). */
+  version?: string;
+};
 
 const TYPES: Record<string, string> = {
   '.html': 'text/html; charset=utf-8',
@@ -29,6 +37,10 @@ const TYPES: Record<string, string> = {
   '.ico': 'image/x-icon',
   '.json': 'application/json; charset=utf-8',
   '.woff2': 'font/woff2',
+  '.md': 'text/markdown; charset=utf-8',
+  '.jpg': 'image/jpeg',
+  '.gif': 'image/gif',
+  '.mp4': 'video/mp4',
 };
 
 const str = (v: unknown, max: number) => (typeof v === 'string' ? v.trim().slice(0, max) : '');
@@ -162,8 +174,22 @@ export function reportMarkdown(r: ReturnType<Repo['report']>, lang: 'sv' | 'en')
   return out.join('\n');
 }
 
-export function createHandler({ repo, engine, autopilot, runtime, publicDir }: Deps) {
+export function createHandler({ repo, engine, autopilot, runtime, publicDir, builder = null, journalRoot, version = '' }: Deps) {
   const root = resolve(publicDir);
+  const journal = journalRoot ? resolve(join(journalRoot, 'journal')) : null;
+  /** Screenshots in a build's journal folder (journalDir is "journal/NNNN-slug"). */
+  const shotsOf = (dir: string | null) => {
+    if (!journal || !dir) return [];
+    try {
+      return readdirSync(join(journal, dir.replace(/^journal\//, ''))).filter((f) => /\.(png|jpe?g|gif)$/i.test(f)).sort();
+    } catch {
+      return [];
+    }
+  };
+  const mustBuilder = () => {
+    if (!builder) throw new AppError(503, 'builder_off', 'The builder is off (IDEAGEN_NO_BUILDER)');
+    return builder;
+  };
 
   function providerStatus() {
     const s = runtime.get();
@@ -279,6 +305,31 @@ export function createHandler({ repo, engine, autopilot, runtime, publicDir }: D
       type: 'text/markdown; charset=utf-8',
     })],
 
+    // ---- self-improvement builds
+    ['GET', /^\/api\/builds$/, () => ({
+      enabled: !!builder,
+      builds: (builder?.list() ?? repo.listBuilds()).map((b) => ({ ...b, shots: shotsOf(b.journalDir) })),
+      active: builder?.active() ?? null,
+    })],
+    ['GET', /^\/api\/builds\/(\d+)$/, ([id]) => {
+      const build = repo.getBuild(+id);
+      if (!build) throw new AppError(404, 'not_found', 'Build not found');
+      return { build, log: builder?.logOf(build.id) ?? [] };
+    }],
+    ['POST', /^\/api\/ideas\/(\d+)\/build$/, ([id]) => {
+      const r = mustBuilder().enqueue(+id, 'hand');
+      if (!r.build) {
+        if (r.reason === 'not_found') throw new AppError(404, 'not_found', 'Idea not found');
+        throw new AppError(400, r.reason ?? 'bad_request', 'Only ideas on a self-improvement board can be built into the app');
+      }
+      return r;
+    }],
+    ['POST', /^\/api\/builds\/(\d+)\/cancel$/, ([id]) => {
+      const build = mustBuilder().cancel(+id);
+      if (!build) throw new AppError(404, 'not_found', 'Build not found');
+      return { build };
+    }],
+
     // ---- flow templates
     ['GET', /^\/api\/templates$/, () => ({ templates: repo.listTemplates() })],
     ['POST', /^\/api\/templates$/, (_p, b) => ({ template: repo.createTemplate(templateBody(b)) })],
@@ -300,7 +351,7 @@ export function createHandler({ repo, engine, autopilot, runtime, publicDir }: D
     if (!repo.getBoard(boardId)) return send(res, 404, { error: 'Board not found' });
     res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive' });
     const write = (e: unknown) => res.write(`data: ${JSON.stringify(e)}\n\n`);
-    write({ type: 'hello', autopilot: autopilot.status(boardId), settingsReceived: runtime.received() });
+    write({ type: 'hello', autopilot: autopilot.status(boardId), settingsReceived: runtime.received(), version });
     const off = engine.bus.on(boardId, write);
     const ping = setInterval(() => res.write(': ping\n\n'), 25_000);
     req.on('close', () => {
@@ -310,9 +361,12 @@ export function createHandler({ repo, engine, autopilot, runtime, publicDir }: D
   }
 
   async function serveStatic(pathname: string, res: ServerResponse) {
-    const rel = pathname === '/' ? 'index.html' : decodeURIComponent(pathname).replace(/^\/+/, '');
-    const file = resolve(join(root, rel));
-    if (file !== root && !file.startsWith(root + sep)) return send(res, 403, { error: 'Forbidden' });
+    // /journal/… : the builds' write-ups and screenshots, straight from the repository.
+    const inJournal = journal && pathname.startsWith('/journal/');
+    const base = inJournal ? journal : root;
+    const rel = pathname === '/' ? 'index.html' : decodeURIComponent(inJournal ? pathname.slice('/journal/'.length) : pathname).replace(/^\/+/, '');
+    const file = resolve(join(base, rel));
+    if (file !== base && !file.startsWith(base + sep)) return send(res, 403, { error: 'Forbidden' });
     try {
       const data = await readFile(file);
       send(res, 200, data, TYPES[extname(file).toLowerCase()] ?? 'application/octet-stream');

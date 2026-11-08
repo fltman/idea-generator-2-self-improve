@@ -25,6 +25,7 @@
       <button id="leads-btn" class="btn ghost" aria-expanded="false" data-i18n="leads"></button>
       <button id="dashboard-btn" class="btn ghost" data-i18n="dashboard"></button>
       <button id="report-btn" class="btn ghost" data-i18n="report"></button>
+      <button id="builds-btn" class="btn ghost" data-i18n="builds"></button>
       <button id="exhibit-btn" class="btn ghost" data-i18n="exhibit"></button>
       <button id="export-btn" class="btn ghost" data-i18n="export"></button>
       <button id="board-settings-btn" class="icon-btn" data-i18n-title="boardSettings">⚙</button>
@@ -42,6 +43,7 @@
         <button id="zoom-out" class="icon-btn" aria-label="−">－</button>
         <button id="fit-btn" class="icon-btn" data-i18n-title="fit">⤢</button>
       </div>
+      <div id="build-ticker" hidden aria-live="polite"></div>
       <form id="seedbar" autocomplete="off">
         <input id="seed-input" data-i18n-ph="seedPlaceholder" aria-label="Seed">
       </form>
@@ -57,6 +59,7 @@
 
   <section id="dashboard" hidden tabindex="-1"></section>
   <section id="report" class="overlay-view" hidden tabindex="-1"></section>
+  <section id="builds" class="overlay-view" hidden tabindex="-1"></section>
   <dialog id="dlg"></dialog>
   <div id="hovercard" role="tooltip"></div>
   <div id="viz-tip" role="tooltip"></div>

@@ -42,6 +42,10 @@ export function createBus() {
         }
       }
     },
+    /** To every open board (the builder's progress is news wherever you are). */
+    emitAll(e: BoardEvent) {
+      for (const id of subs.keys()) this.emit(id, e);
+    },
   };
 }
 
@@ -71,6 +75,10 @@ type Deps = {
   fetchPapers?: typeof realFetchPapers;
   reveal?: (path: string) => void;
   gitInit?: boolean;
+  /** Self-improvement boards: called when an idea gets gold, from the jury or by hand (the builder queues it). */
+  onGold?: (idea: Idea, by: 'jury' | 'hand') => void;
+  /** Self-improvement boards: what the app is and does today, added to every prompt. */
+  selfContext?: () => string;
 };
 
 export function createEngine(deps: Deps) {
@@ -93,6 +101,14 @@ export function createEngine(deps: Deps) {
     return i;
   };
   const modelFor = (board: Board, role: Role) => board.config.models[role] || deps.settings().models[role];
+  // On a self-improvement board the ideas are changes to this app, so every
+  // prompt (and the jury) gets to know the app as it is right now.
+  const selfCtx = (board: Board) => (board.config.selfImprove && deps.selfContext ? deps.selfContext() : '');
+  const flowFor = (board: Board) => {
+    const ctx = selfCtx(board);
+    return ctx ? { ...board.config.flow, system: `${board.config.flow.system}\n\n${ctx}` } : board.config.flow;
+  };
+  const guidanceFor = (board: Board) => [board.config.judgeGuidance, selfCtx(board)].filter((x) => x.trim()).join('\n\n');
   const titles = (boardId: number) => repo.listIdeas(boardId).map((i) => i.title);
   const emitIdeas = (boardId: number, ideas: Idea[]) => ideas.length && bus.emit(boardId, { type: 'ideas', ideas });
 
@@ -140,13 +156,16 @@ export function createEngine(deps: Deps) {
       const { judgement } = await call(board.id, () =>
         llm.judge({
           model: modelFor(board, 'judge'), board, idea, lang: board.config.lang,
-          guidance: board.config.judgeGuidance, vocabulary: repo.keywordVocabulary(),
+          guidance: guidanceFor(board), vocabulary: repo.keywordVocabulary(),
         }),
       );
       repo.saveJudgement(idea.id, judgement);
       const out: { idea: Idea; project?: string; projectError?: string } = { idea: repo.setKeywords(idea.id, judgement.keywords)! };
-      // The judge itself turns gold into a Claude Code project, if the board allows it.
-      if (board.config.autoProjectOnGold && medal(out.idea) === 3 && !out.idea.projectPath) {
+      // Gold on a self-improvement board goes to the builder, which builds it into this app.
+      if (board.config.selfImprove && medal(out.idea) === 3) {
+        deps.onGold?.(out.idea, 'jury');
+      } else if (board.config.autoProjectOnGold && medal(out.idea) === 3 && !out.idea.projectPath) {
+        // The judge itself turns gold into a Claude Code project, if the board allows it.
         try {
           const p = await createProject(out.idea);
           out.idea = p.idea;
@@ -199,7 +218,7 @@ export function createEngine(deps: Deps) {
     const parent = mustIdea(parentId);
     const board = mustBoard(parent.boardId);
     const { ideas } = await call(board.id, () =>
-      llm.expand({ model: modelFor(board, 'expand'), flow: board.config.flow, board, idea: parent, existingTitles: titles(board.id), lang: board.config.lang }),
+      llm.expand({ model: modelFor(board, 'expand'), flow: flowFor(board), board, idea: parent, existingTitles: titles(board.id), lang: board.config.lang }),
     );
     const spots = arcPositions(parent, repo.parentsOf(parent.id)[0] ?? null, ideas.length);
     const created = ideas.map((i, n) =>
@@ -218,7 +237,7 @@ export function createEngine(deps: Deps) {
     const c = mustIdea(bId);
     if (a.boardId !== board.id || c.boardId !== board.id) throw new AppError(400, 'bad_pair', 'Ideas belong to another board');
     const { idea } = await call(board.id, () =>
-      llm.combine({ model: modelFor(board, 'combine'), flow: board.config.flow, board, a, b: c, existingTitles: titles(board.id), lang: board.config.lang }),
+      llm.combine({ model: modelFor(board, 'combine'), flow: flowFor(board), board, a, b: c, existingTitles: titles(board.id), lang: board.config.lang }),
     );
     const dx = c.x - a.x, dy = c.y - a.y, len = Math.hypot(dx, dy) || 1; // midpoint, nudged off the line
     const created = repo.insertIdea(
@@ -247,7 +266,7 @@ export function createEngine(deps: Deps) {
       const text = String(b.text ?? '').trim().slice(0, 20_000);
       if (!text) throw new AppError(400, 'empty', 'Write an idea or paste a link');
       const lang = board.config.lang;
-      const flow = board.config.flow;
+      const flow = flowFor(board);
       const url = asUrl(text);
       let title = text.slice(0, 120);
       let pitch = '';
@@ -305,6 +324,8 @@ export function createEngine(deps: Deps) {
       }
       const idea = repo.setMedalOverride(ideaId, m as number | null)!;
       emitIdeas(idea.boardId, [idea]);
+      // A person handing out gold on a self-improvement board is a request to build it.
+      if (m === 3 && repo.getBoard(idea.boardId)?.config.selfImprove) deps.onGold?.(idea, 'hand');
       return { idea };
     },
 
