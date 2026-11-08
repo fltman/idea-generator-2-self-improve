@@ -1,0 +1,86 @@
+{
+  "seq": 4,
+  "title": "Placebo Trials for Recipes",
+  "pitch": "Borrowed from clinical trials: some breeds get a randomly assigned placebo task, a vague 'improve it', instead of the recipe. The overview compares recipe, placebo and no-task arms per type, so users see whether recipes beat chance.",
+  "status": "merged",
+  "trigger": "hand",
+  "branch": "build/0004-placebo-trials-for-recipes",
+  "commit": null,
+  "summary": "I built placebo trials for lift recipes, and all 85 tests pass (81 before); the work is committed on the build branch. By lot, one in five breeds that would get a recipe gets the vague task \"improve it\" instead, and the child remembers which recipe type was held back. A parent below gold with no recipe breeds into a third arm with no task. The board overview now shows a \"Lift recipes vs. placebo\" table with hits per type for the recipe and placebo arms, the no-task arm in total, and a verdict that says \"too early to tell\" until each arm has 10 judged children. Only the recipe arm feeds the hit rate that steers breeding, so a placebo's luck never moves selection; on the live board the placebo arm is still empty, and screenshot 03 shows a placebo panel I set up by hand.",
+  "error": null,
+  "costUsd": 1.74,
+  "sessionId": "06446103-7723-479a-90f5-780097eb2c0f",
+  "createdAt": "2026-11-08 08:40:33",
+  "startedAt": "2026-11-08 08:40:33",
+  "finishedAt": "2026-11-08 08:45:36",
+  "jury": {
+    "originality": 4,
+    "feasibility": 4,
+    "impact": 3,
+    "reason": "Adds a randomized control arm to test whether lift recipes actually work, making the feedback loop honest; but it needs sample sizes and a clear arm design to be conclusive."
+  },
+  "lineage": [
+    {
+      "kind": "combine",
+      "title": "Controlled Cross-Model Recipe Audit",
+      "pitch": "For each lift attempt, a held-out judge on a different model blind-scores the recipe child and a no-recipe sibling control. Only gain over the control, confirmed by the held-out judge, adds recipe weight in breeding. The panel shows lift versus baseline plus agreement."
+    },
+    {
+      "kind": "expand",
+      "title": "Recipe Audit Against Held-Out Jury",
+      "pitch": "Before a recipe steers breeding, a second judge on a different model scores the child against the recipe's targeted criterion. Recipes whose predicted gain the held-out jury disagrees with lose weight, and the idea panel shows an agreement score, so users can tell real lifts from flattery."
+    },
+    {
+      "kind": "expand",
+      "title": "Lift Attempt Re-Judge With Control",
+      "pitch": "After an offspring is built from a recipe, the jury re-scores it blind to the recipe and also re-scores a no-recipe sibling as control. Only the medal gain over the control counts as a hit, and the panel shows lift versus baseline."
+    },
+    {
+      "kind": "combine",
+      "title": "Lyftbok med duellvy och träffsäkerhet",
+      "pitch": "Juryn skriver ett typmärkt lyftrecept per idé. Autopiloten ger det som uppgift åt avkomman och loggar om medaljen steg. Idépanelen jämför receptet per kriterium med syskonets och visar träffsäkerheten, som också viktar föräldra- och korstypsval."
+    },
+    {
+      "kind": "combine",
+      "title": "Lift Recipes Fed Back by Hit Rate",
+      "pitch": "The jury writes a typed one-medal lift recipe per idea. The autopilot hands it to the offspring as its task, then logs whether the medal rose. Parent and cross-type picks are weighted by each recipe type's hit rate, shown in the panel."
+    },
+    {
+      "kind": "combine",
+      "title": "Jämförbara lyftrecept med träffsäkerhet",
+      "pitch": "Juryn ger varje idé ett typmärkt lyftrecept. Idépanelen visar sida vid sida varför en idé slog en annan, per kriterium, plus recepttypens och korstypens träffsäkerhet från autopilotens logg. Urvalet viktas efter den träffsäkerheten."
+    },
+    {
+      "kind": "combine",
+      "title": "Lyftrecept med mätt träffsäkerhet",
+      "pitch": "Juryn skriver ett typmärkt lyftrecept per idé. Autopiloten ger det som uppgift åt avkomman, loggar om medaljen lyfte per recepttyp och korstyp, och viktar både föräldraval och korstyp efter träffsäkerheten, som visas i idépanelen."
+    },
+    {
+      "kind": "seed",
+      "title": "Jury says what would lift each idea one medal",
+      "pitch": "When the jury scores an idea, it should also say what would lift it one medal, and the next generation should try exactly that."
+    },
+    {
+      "kind": "seed",
+      "title": "People watching the board cannot tell why one idea won over another: make the jury’s reasoning visible and comparable.",
+      "pitch": ""
+    },
+    {
+      "kind": "combine",
+      "title": "Lyftrecept styr korstyper",
+      "pitch": "Juryn skriver för varje idé ett \"lyftrecept\": vilken enskild ändring som ger nästa medalj, märkt med en typ (t.ex. originalitet, genomförbarhet). Autopiloten loggar vilka korstyper och recept som faktiskt lyfte medaljen, viktar urvalet därefter och visar träffsäkerheten per korstyp i idépanelen."
+    },
+    {
+      "kind": "combine",
+      "title": "Lyftrecept som mäts och styr urvalet",
+      "pitch": "Juryn ger varje idé ett typmärkt lyftrecept (kriterium + typ, t.ex. \"skärp genomförbarhet\"). Nästa generation får receptet som uppgift, och autopilotens logg räknar hur ofta det lyfte en medalj. Idépanelen visar receptet, träffsäkerheten per receptyp och korstyp, och urvalet viktas efter den."
+    },
+    {
+      "kind": "seed",
+      "title": "The autopilot should learn which kinds of crosses tend to produce gold on a board, and breed more of those.",
+      "pitch": ""
+    }
+  ],
+  "filmLine": "After three builds spent sharpening its lift recipes, the app finally asked whether they beat a plain \"improve it\", with recipes lifting the medal only 2 times in 44 so far, and its honest answer was that it was too early to tell.",
+  "tests": "✔ second opinion: only a jury sum exactly on a medal threshold is on the edge (0.086959ms)\n✔ second opinion: the band spans both sums and says whether the medals agree (0.112083ms)\n✔ second opinion: disagreement lowers the breeding score by half the gap, either way; agreement costs nothing (0.055083ms)\n✔ gold gate: a jury gold on the edge waits for the second judge; only agreement builds (0.139708ms)\nℹ tests 85\nℹ suites 0\nℹ pass 85\nℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 3949.058083"
+}
