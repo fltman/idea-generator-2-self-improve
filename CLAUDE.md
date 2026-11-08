@@ -7,7 +7,7 @@ This fork improves itself. A self-improvement board generates changes to this ap
 ## Commands
 
 - `npm run dev` – server on http://localhost:8301 that restarts when `server/` changes. A merged build relies on this. (`npm start` does not restart.) `PORT`, `HOST` and `DB_FILE` override.
-- `npm test` – 64 tests (`node --test`), with a fake LLM, fake provider servers, a fake `claude` CLI and a fake build agent. No network.
+- `npm test` – 71 tests (`node --test`), with a fake LLM, fake provider servers, a fake `claude` CLI and a fake build agent. No network.
 - `npm run self:setup` – creates the self-improvement board on a running server.
 - `node tools/shoot.ts --out file.png [--board N] [--eval js]…` – boots this checkout's server against a copy of `data/ideas.db` (autopilot and builder off), opens headless Chrome, and saves a PNG. `--help` lists the options.
 - `npm run calibrate [-- --model provider:model]` – real judge against weak and strong reference ideas. It costs money. **Re-run it whenever the judge's prompt, schema or model changes.**
@@ -33,6 +33,7 @@ This fork improves itself. A self-improvement board generates changes to this ap
 - `server/db.ts` – SQLite (`node:sqlite`), plus `report()` and `dashboard()` queries.
 - `server/app.ts` – HTTP, SSE (`/api/boards/:id/events`) and Markdown exports.
 - `public/js/score.js` and `public/js/evolve.js` – pure modules shared by the server, browser and tests.
+  - Lift recipes live in `evolve.js` (`liftStats`, `recipeOf`, `pickRecipe`, `breedScore`). The jury writes `liftType` + `lift` (saved as `recipe_type`, `recipe`); a child bred under a recipe stores `lift_type`, `lift_from` and `lift_base` (the parent's medal then). A hit is the child's medal above `lift_base`. `openDb()` adds the columns to older databases.
 - `public/js/graph.js` – the canvas.
 - `public/js/app.js` – the main app.
 - `public/js/dashboard.js` and `public/js/report.js` – the trends and report views.
@@ -40,6 +41,7 @@ This fork improves itself. A self-improvement board generates changes to this ap
 ## Rules that matter
 
 - **The medal comes from code, not the model:** a sum of three 1–5 scores, bronze from 9, silver from 11, gold from 13 (`score.js`). Left uncalibrated, an LLM jury gave 3/3 to the bare word "fire"; the calibration test keeps that from happening here.
+- **The lift-recipe nudge stays below one point.** `breedScore()` adds the hit rate minus 0.5 (Laplace-smoothed, so strictly within ±0.5) to fitness. It may only reorder ideas the jury scored the same; the jury's score stays what selection rests on.
 - **Never put integer `minimum`/`maximum` in a JSON schema.** Anthropic rejects them. Put the range in the description and clamp in code.
 - **Anthropic native: send no `temperature`.** API version 2026-10-21 rejects it. Use effort `low`. The SDK sends the key as a Bearer token.
 - **OpenRouter: send `reasoning:{enabled:false}`** and retry without it on a 400 that mentions reasoning (some models insist on reasoning).
@@ -54,6 +56,8 @@ This fork improves itself. A self-improvement board generates changes to this ap
 - **Project folders never overwrite.** They are created with a non-recursive `mkdir`, and a taken name gets `-2`.
 
 ## Measured
+
+- **Calibration is due.** Build 0001 (2026-11-08) added `liftType` and `lift` to the judge's schema, after the scores, and raised its `maxTokens` to 600. The figures below were measured before that; re-run `npm run calibrate` (the build agent cannot: it costs money and is outside its allowlist).
 
 - **`claudecode:sonnet` judge** (2026-11-08):
   - weak ideas: mean 4.9, max 7 (no medal)

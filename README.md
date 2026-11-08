@@ -36,6 +36,7 @@ seed → branch / cross (claudecode:sonnet) → jury (calibrated, claudecode:son
   - USD per day per board
   - a global USD per day
   - error backoff
+- **Lift recipes with a measured hit rate.** For every idea the jury also writes a *lift recipe*: the one change that would earn it the next medal, typed by the criterion it raises (originality, feasibility or impact). Every child bred from that idea, by hand or by the autopilot, gets the recipe as its task and remembers its parent's medal; once the child is judged, the recipe either lifted the medal or it did not. The idea panel shows the recipe, how often recipes of that type have worked on the board, and for a child its task and ✓/✗. The overview shows the hits per type. Breeding uses the numbers: a cross hands on whichever parent's recipe type has the better record, and in tournament selection the hit rate nudges the score by at most ±0.5, so it breaks ties between ideas the jury scored the same but never outweighs a point of score.
 - **Scouts.**
   - *X trends*: Grok with live X search via OpenRouter. A lead is kept only if its post is among the search engine's own citations.
   - *AI research*: Hugging Face daily and semantic paper search, aimed at the goal.
@@ -65,7 +66,7 @@ Needs Node 25 or newer, which runs TypeScript directly (there is no build step),
 npm install             # one dependency: @anthropic-ai/sdk
 npm run dev             # http://localhost:8301 — restarts itself when a build is merged
 npm run self:setup      # once, in another terminal: creates the self-improvement board (autopilot on)
-npm test                # 64 tests, fake LLM, fake claude CLI, fake agent; no network
+npm test                # 71 tests, fake LLM, fake claude CLI, fake agent; no network
 npm run calibrate       # real judge vs. reference ideas (claudecode:sonnet ≈ $0.13)
 npm run shoot -- --help # the screenshot tool the builder's agent uses
 ```

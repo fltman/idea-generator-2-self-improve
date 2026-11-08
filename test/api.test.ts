@@ -14,6 +14,7 @@ import { DEFAULT_APP_SETTINGS, ProviderError, type AppSettings, type ChatRequest
 const calls: ChatRequest[] = [];
 let judgeScores = { originality: 3, feasibility: 3, impact: 3 };
 let judgeKeywords = ['Public Space', 'sound'];
+let judgeLift: Record<string, string> = {}; // liftType + lift, when a test wants the jury to write a recipe
 let failNext: Error | null = null;
 let xCitations: string[] = [];
 
@@ -28,7 +29,7 @@ async function fakeChat(r: ChatRequest) {
   const n = calls.length;
   const value =
     r.schemaName === 'expand' ? { ideas: [1, 2, 3].map((k) => ({ title: `"Barn ${n}.${k}."`, pitch: `Pitch ${k}` })) }
-    : r.schemaName === 'judgement' ? { reason: 'Stark mekanism, oklar kund.', ...judgeScores, keywords: judgeKeywords }
+    : r.schemaName === 'judgement' ? { reason: 'Stark mekanism, oklar kund.', ...judgeScores, keywords: judgeKeywords, ...judgeLift }
     : r.schemaName === 'summary' ? { headline: 'Tavlan rör sig mot ljud.', themes: [{ name: 'Ljud', insight: 'Allt låter.', ideas: ['Lånecyklar'] }], strongest: [{ title: 'Korsning', why: 'Konkret.' }], gaps: ['Ingen tänker på natten.'], nextSteps: ['Korsa A och B.'] }
     : r.schemaName === 'synthesis' ? { headline: 'Bänkarna dominerar.', insights: ['i1', 'i2', 'i3'], standouts: [{ title: 'Sjungande parkbänk', board: 'X', why: 'w' }], opportunities: ['o1', 'o2'], nextSteps: ['n1', 'n2'] }
     : r.schemaName === 'brief' ? { name: 'Sjungande bänk', slug: 'Sjungande Bänk!', oneLiner: 'En bänk som sjunger.', problem: 'P', audience: 'A', mvp: ['m1', 'm2'], outOfScope: ['o'], stack: 's', firstSteps: ['f1', 'f2'], openQuestions: ['q1'], risks: ['r1'] }
@@ -407,4 +408,68 @@ test('a typed seed longer than a title is distilled, never cut off', async () =>
   assert.equal(data.idea.title, 'Destillerat frö');
   assert.ok(calls.some((c) => c.schemaName === 'seed' && c.user.includes('next generation')));
   await engine.idle();
+});
+
+test('lift recipes: the jury writes one, offspring get it as their task, and the hit is counted', async () => {
+  const { liftStats, liftHit } = await import('../public/js/evolve.js');
+  try {
+    judgeScores = { originality: 3, feasibility: 3, impact: 3 }; // 9: bronze
+    judgeLift = { liftType: 'Feasibility', lift: 'Pilota med en skola i en månad.' };
+    const board = await newBoard();
+    const s = await seed(board.id, 'Cykelbuss');
+    await engine.idle();
+    const parent = repo.getIdea(s.id)!;
+    assert.equal(parent.recipeType, 'feasibility', 'the type is normalised');
+    assert.equal(parent.recipe, 'Pilota med en skola i en månad.');
+    assert.match(JSON.stringify(lastCall('judgement').schema), /"liftType"/);
+
+    // Branching hands the recipe on and remembers it.
+    judgeScores = { originality: 4, feasibility: 4, impact: 3 }; // 11: silver, a lift from bronze
+    judgeLift = { liftType: 'impact', lift: 'Mät minskade bilresor.' };
+    const { data } = await api('POST', `/api/ideas/${s.id}/expand`, {});
+    assert.match(lastCall('expand').user, /lift recipe for "Cykelbuss"[\s\S]*raising its feasibility[\s\S]*Pilota med en skola/);
+    assert.match(lastCall('expand').user, /every new idea must carry out exactly this change/);
+    await engine.idle();
+    const kids = data.ideas.map((i: any) => repo.getIdea(i.id)!);
+    for (const k of kids) {
+      assert.deepEqual([k.liftType, k.liftFrom, k.liftBase], ['feasibility', s.id, 1]);
+      assert.equal(liftHit(k), true);
+    }
+    assert.deepEqual(liftStats(repo.listIdeas(board.id)).feasibility, { tries: 3, hits: 3 });
+
+    // A cross takes the recipe whose type has the better record: the seed's feasibility (3/3), not a child's untried impact.
+    const cross = await api('POST', `/api/boards/${board.id}/combine`, { a: kids[0].id, b: s.id });
+    assert.match(lastCall('combine').user, /lift recipe for "Cykelbuss"/);
+    const child = repo.getIdea(cross.data.idea.id)!;
+    assert.deepEqual([child.liftType, child.liftFrom, child.liftBase], ['feasibility', s.id, 1]);
+    await engine.idle();
+
+    // A recipe with an unknown type is dropped, not half-saved.
+    judgeLift = { liftType: 'charm', lift: 'Gör den gulligare.' };
+    const odd = await seed(board.id, 'Konstig idé');
+    await engine.idle();
+    assert.deepEqual([repo.getIdea(odd.id)!.recipeType, repo.getIdea(odd.id)!.recipe], [null, null]);
+  } finally {
+    judgeLift = {};
+    judgeScores = { originality: 3, feasibility: 3, impact: 3 };
+  }
+});
+
+test('lift recipes: an old database gets the new columns', async () => {
+  const { DatabaseSync } = await import('node:sqlite');
+  const file = join(mkdtempSync(join(tmpdir(), 'ideagen-olddb-')), 'old.db');
+  const old = new DatabaseSync(file);
+  old.exec(`CREATE TABLE ideas (
+    id INTEGER PRIMARY KEY, board_id INTEGER NOT NULL, title TEXT NOT NULL, pitch TEXT NOT NULL DEFAULT '',
+    kind TEXT NOT NULL, source_url TEXT, x REAL NOT NULL DEFAULT 0, y REAL NOT NULL DEFAULT 0,
+    originality INTEGER, feasibility INTEGER, impact INTEGER, reason TEXT, judged_at TEXT, medal_override INTEGER,
+    generation INTEGER NOT NULL DEFAULT 0, project_path TEXT, origin_idea_id INTEGER, origin_board_id INTEGER,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')))`);
+  old.close();
+  const r = openDb(file);
+  const b = r.createBoard({ title: 'Gammal' });
+  const i = r.insertIdea({ boardId: b.id, title: 'T', pitch: '', kind: 'seed', x: 0, y: 0, generation: 0 });
+  r.saveJudgement(i.id, { originality: 3, feasibility: 3, impact: 3, reason: 'r', liftType: 'impact', lift: 'Gör så.' });
+  const got = r.getIdea(i.id)!;
+  assert.deepEqual([got.recipeType, got.recipe, got.liftType], ['impact', 'Gör så.', null]);
 });

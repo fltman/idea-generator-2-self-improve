@@ -6,7 +6,7 @@ import { t, getLang, setLang, applyI18n, errorText } from './i18n.js';
 import { Graph, KIND_COLORS } from './graph.js';
 import { loadSettings, saveSettings, pushSettings, ROLES, PROVIDER_IDS, providersInUse, DEFAULTS } from './settings.js';
 import { medal, scoreSum, fitness, CRITERIA } from './score.js';
-import { evolutionStats } from './evolve.js';
+import { evolutionStats, liftStats, liftHit, LIFT_TYPES } from './evolve.js';
 import { openDashboard } from './dashboard.js';
 import { openReport } from './report.js';
 import { initBuilds, onBuildEvent, buildFor, startBuild, openBuilds, buildIcon, formatSeq } from './builds.js';
@@ -390,6 +390,47 @@ function scoreBlock(idea) {
   );
 }
 
+/** The jury's lift recipe for this idea, how often that type of recipe has worked here, and the task this idea was bred under. */
+function liftBlock(idea) {
+  const stats = liftStats(ideaList());
+  const typeName = (type) => t(type).toLowerCase();
+  const recipe = idea.recipeType && idea.recipe ? (() => {
+    const s = stats[idea.recipeType] ?? { tries: 0, hits: 0 };
+    return [
+      h('div', { class: 'lift-head', title: t('liftRecipeHint') }, `⬆ ${t('liftRecipe')} · ${t(idea.recipeType)}`),
+      h('p', { class: 'lift-text' }, idea.recipe),
+      h('div', { class: 'lift-rate muted' },
+        s.tries ? t('liftHitRate', { type: typeName(idea.recipeType), hits: s.hits, tries: s.tries }) : t('liftHitNone', { type: typeName(idea.recipeType) })),
+    ];
+  })() : null;
+  let task = null;
+  if (idea.liftType) {
+    const parent = S.ideas.get(idea.liftFrom);
+    const hit = liftHit(idea);
+    task = h('div', { class: 'lift-task' },
+      h('button', { class: 'linkish', disabled: !parent, onclick: () => parent && graph.h.select(parent.id) },
+        t('liftTask', { p: parent ? `"${parent.title}"` : '?', type: typeName(idea.liftType) })),
+      h('div', { class: hit == null ? 'muted' : hit ? 'lift-hit' : 'lift-miss' },
+        hit == null ? t('liftTaskPending') : hit ? t('liftTaskHit') : t('liftTaskMiss')),
+    );
+  }
+  if (!recipe && !task) return null;
+  return h('div', { class: 'lift' }, task, recipe);
+}
+
+/** Overview: hits per recipe type on this board. */
+function liftOverview(ideas) {
+  const stats = liftStats(ideas);
+  const tried = LIFT_TYPES.filter((type) => stats[type].tries);
+  if (!tried.length && !ideas.some((i) => i.recipe)) return null;
+  return h('div', { class: 'evo lift-overview' },
+    h('span', { class: 'muted' }, t('liftOverview')),
+    tried.length
+      ? h('div', {}, tried.map((type) => `${t(type)} ${stats[type].hits}/${stats[type].tries}`).join(' · '))
+      : h('div', { class: 'muted' }, t('liftNoData')),
+  );
+}
+
 function renderIdea(idea) {
   const panel = $('#panel');
   const spun = S.spinoffs.filter((s) => s.ideaId === idea.id);
@@ -415,6 +456,7 @@ function renderIdea(idea) {
     idea.pitch ? h('p', { class: 'pitch' }, idea.pitch) : null,
     idea.sourceUrl ? h('a', { class: 'source', href: idea.sourceUrl, target: '_blank', rel: 'noopener noreferrer' }, `${t('source')} ↗`) : null,
     scoreBlock(idea),
+    liftBlock(idea),
     idea.keywords?.length
       ? h('div', { class: 'chips' }, idea.keywords.map((k) => h('button', { class: 'chip', onclick: () => openDashboard({ keyword: k, onOpenIdea }) }, k)))
       : null,
@@ -518,6 +560,7 @@ function renderOverview() {
             ? t('evoLine', { g: stats.generation, first: fmt(stats.first), latest: fmt(stats.latest), best: stats.best })
             : t('evoShort', { g: stats.generation, best: stats.best })))
       : null,
+    liftOverview(ideas),
     h('section', { class: 'summary' },
       h('div', { class: 'row space' }, h('h3', {}, t('summary')),
         ideas.length >= 2 ? h('button', { class: 'btn small', onclick: (ev) => summarize(ev.currentTarget) }, s ? t('resummarize') : t('summarize')) : null),
