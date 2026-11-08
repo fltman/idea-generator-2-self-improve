@@ -1026,7 +1026,85 @@ async function newBoardDialog(first = false) {
       },
     }, t('create')),
   ]);
+  // A board for an existing codebase instead: analyse a folder, pick directions.
+  dlg.querySelector('footer').prepend(h('button', { class: 'btn', onclick: (e) => { e.preventDefault(); dlg.close(); repoBoardDialog(); } }, `📁 ${t('repoBoard')}`));
   title.focus();
+}
+
+/**
+ * Codebase board: point at a local folder, let the model read it (file tree and
+ * docs only, nothing is run), pick the directions the ideas should take, and the
+ * board starts. Gold ideas are appended to a Markdown file.
+ */
+function repoBoardDialog() {
+  const path = h('input', { placeholder: '~/Projekt/my-app', spellcheck: false });
+  const result = h('div', { class: 'repo-result' });
+  const analyse = h('button', { class: 'btn' }, t('repoAnalyse'));
+  const create = h('button', { class: 'btn primary', disabled: true }, t('create'));
+  let state = null; // { path, analysis, picks: [{focus, box}], extra, title, auto, usd }
+  analyse.onclick = async (e) => {
+    e.preventDefault();
+    analyse.disabled = true;
+    create.disabled = true;
+    analyse.textContent = t('repoReading');
+    clear(result);
+    try {
+      const r = await api('POST', '/api/repo/analyze', { path: path.value, lang: getLang() });
+      const picks = r.analysis.focuses.map((f, i) => ({ focus: f, box: h('input', { type: 'checkbox', checked: i < 2 }) }));
+      const extra = h('input', { placeholder: t('repoExtraPlaceholder') });
+      const title = h('input', { value: r.scan.name });
+      const auto = h('input', { type: 'checkbox', checked: true });
+      const usd = h('input', { type: 'number', min: 0, step: 0.5, value: 2 });
+      state = { path: r.scan.path, analysis: r.analysis, picks, extra, title, auto, usd };
+      const langs = Object.entries(r.scan.languages).slice(0, 5).map(([k, n]) => `${k} ${n}`).join(' · ');
+      result.append(
+        h('p', { class: 'repo-meta muted' }, `${r.scan.short} · ${t('repoFiles', { n: r.scan.files })} · ${langs}`),
+        h('p', {}, r.analysis.summary),
+        r.analysis.stack ? h('p', { class: 'muted' }, r.analysis.stack) : null,
+        h('h4', {}, t('repoFocusQ')),
+        h('div', { class: 'repo-focus' }, picks.map(({ focus, box }) =>
+          h('label', { class: 'check repo-pick' }, box,
+            h('span', {}, h('b', {}, focus.label), h('small', { class: 'muted' }, ` ${focus.why}`), h('br'), h('small', {}, `→ ${focus.seed}`))))),
+        field(t('repoExtra'), extra),
+        h('div', { class: 'grid2' }, field(t('title'), title), field(t('usdPerDay'), usd)),
+        h('label', { class: 'check' }, auto, t('repoAutoStart')),
+        h('small', { class: 'muted' }, t('repoGoldNote')),
+      );
+      create.disabled = false;
+    } catch (err) {
+      fail(err);
+    } finally {
+      analyse.disabled = false;
+      analyse.textContent = t('repoAnalyse');
+    }
+  };
+  create.onclick = async (e) => {
+    e.preventDefault();
+    if (!state) return;
+    create.disabled = true;
+    try {
+      const { board } = await api('POST', '/api/boards/repo', {
+        path: state.path, lang: getLang(), title: state.title.value,
+        summary: state.analysis.summary, stack: state.analysis.stack,
+        focuses: state.picks.filter((p) => p.box.checked).map((p) => p.focus),
+        extra: state.extra.value, autopilot: state.auto.checked, usdPerDay: Number(state.usd.value),
+      });
+      dlg.close();
+      await loadBoards();
+      await openBoard(board.id);
+      toast(t('repoGoldAt', { file: board.config.repo.goldFile }), 'info', 8000);
+    } catch (err) {
+      fail(err);
+      create.disabled = false;
+    }
+  };
+  path.onkeydown = (e) => { if (e.key === 'Enter') analyse.click(); };
+  const dlg = dialog('dlg', t('repoBoard'), [
+    h('p', { class: 'muted' }, t('repoIntro')),
+    h('div', { class: 'repo-path' }, field(t('repoPath'), path), analyse),
+    result,
+  ], [h('button', { class: 'btn', value: 'cancel' }, t('cancel')), create]);
+  path.focus();
 }
 
 async function boardSettingsDialog() {
@@ -1079,6 +1157,11 @@ async function boardSettingsDialog() {
     h('fieldset', {}, h('legend', {}, t('jury')), field(t('judgeGuidance'), guidance),
       h('label', { class: 'check' }, autoProj, t('autoProject')),
       h('label', { class: 'check', title: t('plainHint', { n: PLAIN_GAP }) }, wordingOn, t('wordingGapOn'))),
+    c.repo ? h('fieldset', {}, h('legend', {}, `📁 ${t('repoBoard')}`),
+      h('p', {}, h('code', {}, c.repo.path)),
+      h('p', {}, t('repoFocusIs', { focus: c.repo.focus.join(' · ') })),
+      h('p', {}, t('repoGoldIs'), ' ', h('code', {}, c.repo.goldFile)),
+      c.repo.testCommand ? h('small', { class: 'muted' }, t('repoTestIs', { cmd: c.repo.testCommand })) : null) : null,
     h('fieldset', {}, h('legend', {}, t('selfImprove')),
       h('label', { class: 'check' }, selfOn, t('selfImproveOn')),
       h('div', { class: 'grid2' }, field(t('buildsPerDay'), buildsPerDay), field(t('buildModel'), buildModel)),

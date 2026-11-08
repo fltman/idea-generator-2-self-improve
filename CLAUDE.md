@@ -7,7 +7,7 @@ This fork improves itself. A self-improvement board generates changes to this ap
 ## Commands
 
 - `npm run dev` – server on http://localhost:8301 that restarts when `server/` changes. A merged build relies on this. (`npm start` does not restart.) `PORT`, `HOST` and `DB_FILE` override.
-- `npm test` – 103 tests (`node --test`), with a fake LLM, fake provider servers, a fake `claude` CLI and a fake build agent. No network.
+- `npm test` – 110 tests (`node --test`), with a fake LLM, fake provider servers, a fake `claude` CLI and a fake build agent. No network.
 - `npm run self:setup` – creates the self-improvement board on a running server. `-- --new --title … --seed … --usd N --retire` starts a fresh one and switches the old ones to manual: the way to restart the loop once the old pool keeps proposing what is already built. The camera follows the self-improvement board whose autopilot runs.
 - `node tools/shoot.ts --out file.png [--board N] [--eval js]…` – boots this checkout's server against a copy of `data/ideas.db` (autopilot and builder off), opens headless Chrome, and saves a PNG. `--help` lists the options.
 - `npm run calibrate [-- --model provider:model]` – real judge against weak and strong reference ideas. It costs money. **Re-run it whenever the judge's prompt, schema or model changes.**
@@ -29,6 +29,7 @@ This fork improves itself. A self-improvement board generates changes to this ap
 - `server/builder.ts` – the self-improvement builder:
   - queue, worktree, the agent run (stream-json), verification, merge and the journal
   - `selfContext()`: the README feature list plus the merged builds, added to every prompt on self-improvement boards
+- `server/reposcan.ts` – codebase boards: `scanRepo()` reads a local folder read-only (tree, README/CLAUDE.md/manifests, entry-file samples when docs are thin; skips `SKIP_DIRS`, dotfiles and symlinks; capped) and `scanText()` makes the prompt text. `engine.analyzeRepo()` (`POST /api/repo/analyze`, `llm.analyzeRepo`, schema `repoanalysis`, the `summary` role's model) proposes directions; `engine.createRepoBoard()` (`POST /api/boards/repo`) rescans, writes the goal, jury guidance and flow, stores `config.repo` (path, summary, focus, context, goldFile, testCommand), seeds one idea per direction and starts the autopilot. `repoCtx()` adds the scan to every prompt and the jury; `logGold()` appends each gold (jury or hand) once to `goldFile` (default `data/gold/`, `deps.goldRoot` in tests).
 - `server/camera.ts` – the progress camera: screenshots of the live board go to `progress/` (gitignored). It shoots on a timer and at every gold idea, build and restart, and keeps `latest.png` and a `README.md` log. It uses `?camera` so the headless browser never pushes settings.
 - `journal/` – one folder per build (`NNNN-slug/`: the agent's README.md, screenshots, build.json) and `INDEX.md`. Committed and public.
 - `data/worktrees/`, `data/builds/` – live worktrees, and each build's log.txt and full transcript.jsonl. Gitignored.
@@ -70,6 +71,7 @@ This fork improves itself. A self-improvement board generates changes to this ap
 - **The build agent is scoped.** It runs `--permission-mode acceptEdits` with an allowlist (`AGENT_ALLOWED` in builder.ts): edits, `npm test`, `node tools/shoot.ts`, and local git add/commit/diff/log. It may not push, checkout, reset, merge, rm, curl, `npm install`, or use the web. Never run it with `--dangerously-skip-permissions`.
 - **No new npm dependencies.** The worktree's `node_modules` is a symlink to the main one. **A build never commits `node_modules` or `data/`.** Build 0001 merged that symlink and took the live server down (a trailing slash in `.gitignore` does not match a symlink). The builder now writes both into `info/exclude` and refuses any branch that touches them.
 - **Anything started inside a worktree gets `IDEAGEN_NO_AUTOPILOT=1 IDEAGEN_NO_BUILDER=1`** and never the live `PORT` or `DB_FILE`.
+- **A codebase scan only reads.** `scanRepo()` never runs, installs or imports anything from the folder, never follows a symlink, and skips dotfiles (`.env`). The scan text in the prompts comes from a fresh scan on the server, never from the browser (only the analysis summary and the picked directions travel through it).
 - **Project folders never overwrite.** They are created with a non-recursive `mkdir`, and a taken name gets `-2`.
 
 ## Measured

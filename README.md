@@ -53,6 +53,7 @@ seed → branch / cross (claudecode:sonnet) → jury (calibrated, claudecode:son
 - **Across boards.**
   - *Announce* an idea to other boards. It arrives as a guest, is judged against the new board's goal, and cross-breeds there.
   - Spin an idea off into a *new board* where it is the goal.
+- **Boards for your own codebase.** *New board → 📁 From codebase*: give a local folder, press *Analyse*, and the app reads the file tree, the README, CLAUDE.md and package manifests (with little documentation, the start of the likeliest entry files). It runs none of the project's code, skips `node_modules`, `.git`, dotfiles and symlinks, and caps what it reads. The model describes the code and proposes 4–6 directions, each with a reason drawn from the files and a starter idea; you tick the ones you want (features, UX, performance, tests, …) or write your own. The board is created with those directions as its goal, a jury that judges feasibility and originality against that code, the scan in every prompt, one seed per direction, and the autopilot running. Gold ideas are appended to a Markdown file (`data/gold/board-N-name.md`, shown in the board settings), from the jury or by hand. Building them into the codebase with Claude Code is the next step.
 - **Self-improvement.** A board marked *self-improvement* proposes changes to this app, and its gold ideas are built in by Claude Code (see [The loop](#the-loop)). An idea's panel there has 🔨 *Build it into the app* instead of the project button, and setting its medal to 🥇 by hand starts a build too.
 - **Claude Code projects.** One click, or the jury on gold, writes a folder containing `CLAUDE.md` (brief, MVP, first steps, open questions, lineage, verdict), `README.md`, `idea.json`, a gitignored `vault/`, and runs `git init`.
 - **Board summary, keyword trend dashboard, report.**
@@ -75,7 +76,7 @@ Needs Node 25 or newer, which runs TypeScript directly (there is no build step),
 npm install             # one dependency: @anthropic-ai/sdk
 npm run dev             # http://localhost:8301 — restarts itself when a build is merged
 npm run self:setup      # once, in another terminal: creates the self-improvement board (autopilot on)
-npm test                # 103 tests, fake LLM, fake claude CLI, fake agent; no network
+npm test                # 110 tests, fake LLM, fake claude CLI, fake agent; no network
 npm run calibrate       # real judge vs. reference ideas (claudecode:sonnet ≈ $0.13)
 npm run shoot -- --help # the screenshot tool the builder's agent uses
 ```

@@ -4,12 +4,14 @@
 // is published on a per-board bus that the browser follows over SSE.
 
 import { execFile } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import type { Repo, Idea, Board } from './db.ts';
 import { makeLLM } from './llm.ts';
 import { asUrl, fetchPage as realFetchPage } from './extract.ts';
 import { fetchPapers as realFetchPapers, researchLeads, xLeads } from './leads.ts';
-import { writeBrief, writeProject } from './project.ts';
+import { slugify, writeBrief, writeProject } from './project.ts';
+import { RepoError, scanRepo, scanText, shortPath } from './reposcan.ts';
 import { ProviderError, type AppSettings, type ChatFn, type Role } from './providers.ts';
 import { fitness, isJudged, medal, scoreSum, onMedalEdge, goldGate } from '../public/js/score.js';
 import { nextMove, assignArm, liftStats, armOf, controlDue, drawStyle } from '../public/js/evolve.js';
@@ -85,6 +87,8 @@ type Deps = {
   duelRng?: () => number;
   /** Idea styles: the lot that picks each breed's style. Its own rng, so the arm and duel draws stay as they were (tests fix it). */
   styleRng?: () => number;
+  /** Codebase boards: the folder gold logs go to unless a board names its own file (default data/gold). */
+  goldRoot?: string;
 };
 
 export function createEngine(deps: Deps) {
@@ -113,14 +117,58 @@ export function createEngine(deps: Deps) {
   // On a self-improvement board the ideas are changes to this app, so every
   // prompt (and the jury) gets to know the app as it is right now.
   const selfCtx = (board: Board) => (board.config.selfImprove && deps.selfContext ? deps.selfContext() : '');
+  // On a codebase board the ideas are improvements to someone's code, so every prompt (and the jury) gets the scan.
+  const repoCtx = (board: Board) => {
+    const r = board.config.repo;
+    if (!r) return '';
+    return [
+      `This board improves the codebase "${r.name}" (${r.path}).`,
+      r.summary && `What it is: ${r.summary}`,
+      r.stack && `Stack: ${r.stack}`,
+      r.focus.length ? `The owner wants ideas in these directions: ${r.focus.join('; ')}.` : '',
+      r.context,
+    ].filter(Boolean).join('\n');
+  };
+  const extraCtx = (board: Board) => [selfCtx(board), repoCtx(board)].filter(Boolean).join('\n\n');
   // The board's language wins over the source ideas' on self-improvement boards: one
   // Swedish slip would otherwise breed a Swedish lineage, and the code and journal follow the board.
-  const ctxOf = (board: Board) => ({ goal: board.goal, fixedLang: board.config.selfImprove ? board.config.lang : undefined });
+  const ctxOf = (board: Board) => ({ goal: board.goal, fixedLang: board.config.selfImprove || board.config.repo ? board.config.lang : undefined });
   const flowFor = (board: Board) => {
-    const ctx = selfCtx(board);
+    const ctx = extraCtx(board);
     return ctx ? { ...board.config.flow, system: `${board.config.flow.system}\n\n${ctx}` } : board.config.flow;
   };
-  const guidanceFor = (board: Board) => [board.config.judgeGuidance, selfCtx(board)].filter((x) => x.trim()).join('\n\n');
+  const guidanceFor = (board: Board) => [board.config.judgeGuidance, extraCtx(board)].filter((x) => x.trim()).join('\n\n');
+
+  /**
+   * Codebase boards: append a gold idea to the board's gold file (Markdown), once
+   * per idea. A failure is logged, never thrown: the verdict stands either way.
+   */
+  function logGold(board: Board, idea: Idea, by: 'jury' | 'hand') {
+    const r = board.config.repo;
+    if (!r?.goldFile) return null;
+    try {
+      const marker = `<!-- idea:${idea.id} -->`;
+      const exists = existsSync(r.goldFile);
+      if (exists && readFileSync(r.goldFile, 'utf8').includes(marker)) return null;
+      mkdirSync(dirname(r.goldFile), { recursive: true });
+      const head = exists ? '' : `# Gold ideas for ${r.name}\n\nFrom the Idea Generator board "${board.title}". Each idea is an improvement to ${r.path}.\n`;
+      const scores = isJudged(idea) ? ` · ${idea.originality}/${idea.feasibility}/${idea.impact} (${scoreSum(idea)}/15)` : '';
+      const lineage = repo.lineage(idea.id).filter((l) => l.id !== idea.id).map((l) => `  - ${l.title}`).join('\n');
+      appendFileSync(r.goldFile, [
+        head,
+        `\n## ${idea.title}\n${marker}\n`,
+        `${idea.pitch}\n`,
+        `*${new Date().toISOString().slice(0, 16).replace('T', ' ')} · gold ${by === 'hand' ? 'by hand' : 'from the jury'}${scores}*\n`,
+        idea.reason ? `> Jury: ${idea.reason}\n` : '',
+        lineage ? `Grew out of:\n${lineage}\n` : '',
+      ].join('\n'));
+      bus.emit(board.id, { type: 'goldLogged', ideaId: idea.id, file: r.goldFile });
+      return r.goldFile;
+    } catch (e: any) {
+      console.log(`[gold] ${r.goldFile}: ${e?.message ?? e}`);
+      return null;
+    }
+  }
   const titles = (boardId: number) => repo.listIdeas(boardId).map((i) => i.title);
   const emitIdeas = (boardId: number, ideas: Idea[]) => ideas.length && bus.emit(boardId, { type: 'ideas', ideas });
 
@@ -177,6 +225,9 @@ export function createEngine(deps: Deps) {
       if (board.config.selfImprove && medal(out.idea) === 3) {
         // A gold on the edge (exactly 13) waits for the blind second judge; retrial() builds it if both agree.
         if (!autoRetrial(board, out.idea)) deps.onGold?.(out.idea, 'jury');
+      } else if (board.config.repo && medal(out.idea) === 3) {
+        // A codebase board logs its gold to a file for the owner (and, later, a builder).
+        logGold(board, out.idea, 'jury');
       } else if (board.config.autoProjectOnGold && medal(out.idea) === 3 && !out.idea.projectPath) {
         // The judge itself turns gold into a Claude Code project, if the board allows it.
         try {
@@ -452,7 +503,7 @@ export function createEngine(deps: Deps) {
     return { idea: created, edges };
   }
 
-  return {
+  const api = {
     bus,
     judging,
     idle,
@@ -529,6 +580,8 @@ export function createEngine(deps: Deps) {
       emitIdeas(idea.boardId, [idea]);
       // A person handing out gold on a self-improvement board is a request to build it.
       if (m === 3 && repo.getBoard(idea.boardId)?.config.selfImprove) deps.onGold?.(idea, 'hand');
+      const owner = repo.getBoard(idea.boardId);
+      if (m === 3 && owner?.config.repo) logGold(owner, idea, 'hand');
       return { idea };
     },
 
@@ -581,6 +634,95 @@ export function createEngine(deps: Deps) {
       bus.emit(parent.id, { type: 'spinoff', ideaId: idea.id, boardId: board.id, title: board.title });
       queueJudge([root.id]);
       return { board: repo.getBoard(board.id), idea: root };
+    },
+
+    /**
+     * Codebase boards, step 1: scan a folder (read-only) and ask the model what
+     * the code is and which directions ideas could take. Nothing is stored.
+     */
+    async analyzeRepo(b: { path?: unknown; lang?: unknown }) {
+      const lang = b.lang === 'en' ? 'en' : 'sv';
+      let scan;
+      try {
+        scan = scanRepo(b.path);
+      } catch (e: any) {
+        if (e instanceof RepoError) throw new AppError(400, e.code, e.message);
+        throw e;
+      }
+      if (!scan.files) throw new AppError(400, 'empty_repo', `No files to read in ${scan.path}`);
+      const model = deps.settings().models.summary;
+      let out;
+      try {
+        out = await llm.analyzeRepo({ model, scan: scanText(scan), lang });
+      } catch (e: any) {
+        throw new AppError(502, e instanceof ProviderError ? e.code : 'llm_failed', e?.message ?? String(e));
+      }
+      return {
+        scan: { path: scan.path, short: shortPath(scan.path), name: scan.name, files: scan.files, languages: scan.languages, testCommand: scan.testCommand, docs: scan.docs.map((d) => d.file) },
+        analysis: { summary: out.summary, stack: out.stack, focuses: out.focuses },
+        costUsd: out.costUsd,
+      };
+    },
+
+    /**
+     * Codebase boards, step 2: create the board from the analysis and the
+     * directions the person picked. The folder is scanned again here, so the
+     * context in the prompts comes from the files, not from the browser.
+     */
+    async createRepoBoard(b: any) {
+      const lang: 'sv' | 'en' = b.lang === 'en' ? 'en' : 'sv';
+      let scan;
+      try {
+        scan = scanRepo(b.path);
+      } catch (e: any) {
+        if (e instanceof RepoError) throw new AppError(400, e.code, e.message);
+        throw e;
+      }
+      const cut = (v: unknown, n: number) => (typeof v === 'string' ? v.trim().slice(0, n) : '');
+      const focuses = (Array.isArray(b.focuses) ? b.focuses : [])
+        .map((f: any) => ({ label: cut(f?.label, 60), seed: cut(f?.seed, 120) }))
+        .filter((f: { label: string }) => f.label)
+        .slice(0, 8);
+      const extra = cut(b.extra, 300);
+      const focus = [...focuses.map((f: { label: string }) => f.label), ...(extra ? [extra] : [])];
+      if (!focus.length) throw new AppError(400, 'no_focus', 'Pick at least one direction, or write your own');
+      const summary = cut(b.summary, 800);
+      const stack = cut(b.stack, 300);
+      const title = cut(b.title, 120) || scan.name;
+      const goldRoot = deps.goldRoot ?? join(process.cwd(), 'data', 'gold');
+      const goal = `Improve the codebase "${scan.name}" in these directions: ${focus.join('; ')}. Every idea is a concrete change to this code that a coding agent could build and test.`.slice(0, 600);
+      const board = repo.createBoard({ title, goal, templateId: null, config: { lang } });
+      const goldFile = join(goldRoot, `board-${board.id}-${slugify(scan.name)}.md`);
+      const config = {
+        flowName: 'Kodbas · Codebase',
+        flow: {
+          system: `You are a senior engineer and product thinker improving the codebase "${scan.name}". You think in concrete changes to its code: what to add, change or remove, where in the code, and how a user or developer would notice.`,
+          expand: 'Generate 3 improvements to the codebase that grow out of this one. Make them differ: one that sharpens it into the smallest shippable change, one that borrows a mechanism from another field or product, and one bolder change. Each must name what changes in the code and how someone would see or measure it.',
+          combine: 'Fuse the two improvements into ONE change to the codebase where each part makes the other work better. Name the concrete mechanism, where in the code it lives, and what a user or developer sees.',
+        },
+        judgeGuidance: [
+          `Each idea is a proposed change to the codebase "${scan.name}".`,
+          `FEASIBILITY: could a coding agent build and test it in this codebase in about an hour, without new paid services or accounts? 5 = a contained change to a few files with an obvious test. 3 = touches several parts but is clear. 1–2 = vague, needs new infrastructure or a human to finish it.`,
+          `IMPACT: how much it moves the codebase in the directions its owner chose (${focus.join('; ')}). Cosmetic tweaks score at most 2.`,
+          'ORIGINALITY is judged against what the code already does (see the scan below). A feature it already has scores 1.',
+          'An idea that does not say where in the code it lands, or how to verify it, scores at most 3 on feasibility.',
+        ].join('\n'),
+        researchers: { x: { enabled: false, focus: '' }, research: { enabled: false, focus: '' } },
+        autoProjectOnGold: false,
+        mode: b.autopilot === false ? 'manual' : 'auto',
+        autopilotSeconds: 45,
+        rate: { stepsPerHour: 40, usdPerDay: Number.isFinite(Number(b.usdPerDay)) ? Number(b.usdPerDay) : 2 },
+        repo: { path: scan.path, name: scan.name, summary, stack, focus, context: scanText(scan), goldFile, testCommand: scan.testCommand },
+      };
+      repo.updateBoard(board.id, { config });
+      // One starter idea per picked direction, in a ring; the jury judges them in the background.
+      const seeds = focuses.map((f: { seed: string }) => f.seed).filter(Boolean);
+      if (extra) seeds.push(extra);
+      await Promise.all(seeds.map((text: string, i: number) => {
+        const a = (i / seeds.length) * Math.PI * 2;
+        return api.seed(board.id, { text, x: Math.round(Math.cos(a) * 260), y: Math.round(Math.sin(a) * 260) });
+      }));
+      return { board: repo.getBoard(board.id) };
     },
 
     updateBoard(boardId: number, patch: { title?: string; goal?: string; config?: unknown }) {
@@ -705,6 +847,7 @@ export function createEngine(deps: Deps) {
       return { did: 'combine', ids };
     },
   };
+  return api;
 }
 
 export type Engine = ReturnType<typeof createEngine>;

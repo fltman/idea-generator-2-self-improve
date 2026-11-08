@@ -210,7 +210,34 @@ export type BoardConfig = {
   buildModel: string;
   /** Per-role model overrides ("provider:model"); empty = the app-wide setting. */
   models: Partial<Record<(typeof MODEL_ROLES)[number], string>>;
+  /**
+   * Codebase board: ideas are improvements to the code in this folder. `context`
+   * (the scan and the analysis) goes into every prompt and the jury; gold ideas
+   * are appended to `goldFile`. null on ordinary boards.
+   */
+  repo: RepoConfig | null;
 };
+export type RepoConfig = { path: string; name: string; summary: string; stack: string; focus: string[]; context: string; goldFile: string; testCommand: string | null };
+
+/** A codebase board's settings from untrusted input; null unless it has an absolute path. */
+export function cleanRepoConfig(raw: any, base: RepoConfig | null): RepoConfig | null {
+  if (raw === null) return null;
+  if (!raw || typeof raw !== 'object') return base;
+  const s = (v: unknown, max: number, fb = '') => (typeof v === 'string' ? v.trim().slice(0, max) : fb);
+  const path = s(raw.path, 1000, base?.path ?? '');
+  if (!path.startsWith('/')) return base;
+  const goldFile = s(raw.goldFile, 1000, base?.goldFile ?? '');
+  return {
+    path,
+    name: s(raw.name, 120, base?.name ?? '') || path.split('/').pop() || 'code',
+    summary: s(raw.summary, 1000, base?.summary ?? ''),
+    stack: s(raw.stack, 300, base?.stack ?? ''),
+    focus: Array.isArray(raw.focus) ? raw.focus.map((f: unknown) => s(f, 200)).filter(Boolean).slice(0, 8) : base?.focus ?? [],
+    context: s(raw.context, 16_000, base?.context ?? ''),
+    goldFile: goldFile.startsWith('/') ? goldFile : base?.goldFile ?? '',
+    testCommand: typeof raw.testCommand === 'string' ? s(raw.testCommand, 200) || null : base?.testCommand ?? null,
+  };
+}
 
 export function defaultConfig(template = DEFAULT_TEMPLATES[0]): BoardConfig {
   return {
@@ -228,6 +255,7 @@ export function defaultConfig(template = DEFAULT_TEMPLATES[0]): BoardConfig {
     buildsPerDay: 4,
     buildModel: 'opus',
     models: {},
+    repo: null,
   };
 }
 
@@ -279,6 +307,7 @@ export function mergeConfig(base: BoardConfig, raw: any): BoardConfig {
       ? Math.min(50, Math.max(0, Math.round(Number(r.buildsPerDay)))) : base.buildsPerDay,
     buildModel: /^[a-z0-9.\-\[\]]{2,60}$/i.test(String(r.buildModel ?? '').trim()) ? String(r.buildModel).trim() : base.buildModel,
     models,
+    repo: 'repo' in r ? cleanRepoConfig(r.repo, base.repo ?? null) : base.repo ?? null,
   };
 }
 

@@ -250,6 +250,9 @@ export function createHandler({ repo, engine, autopilot, runtime, publicDir, bui
         spentToday: repo.spentOn(board.id),
       };
     }],
+    // ---- codebase boards: analyse a local folder, then create a board from the picked directions
+    ['POST', /^\/api\/repo\/analyze$/, (_p, b) => engine.analyzeRepo(b)],
+    ['POST', /^\/api\/boards\/repo$/, (_p, b) => engine.createRepoBoard(b)],
     ['PATCH', /^\/api\/boards\/(\d+)$/, ([id], b) => {
       const patch: any = {};
       if (typeof b.title === 'string' && b.title.trim()) patch.title = str(b.title, 120);
