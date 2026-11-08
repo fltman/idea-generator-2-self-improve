@@ -6,7 +6,7 @@ import { t, getLang, setLang, applyI18n, errorText } from './i18n.js';
 import { Graph, KIND_COLORS } from './graph.js';
 import { loadSettings, saveSettings, pushSettings, ROLES, PROVIDER_IDS, providersInUse, DEFAULTS } from './settings.js';
 import { medal, scoreSum, fitness, CRITERIA, isJudged, onMedalEdge, confidenceBand, MEDAL_MIN_SUM, goldGate, retrialSum } from './score.js';
-import { evolutionStats, liftStats, liftHit, LIFT_TYPES, doubtPenalty } from './evolve.js';
+import { evolutionStats, liftStats, LIFT_TYPES, doubtPenalty, armOf, armHit, trialStats, trialVerdict, ARMS, TRIAL_MIN } from './evolve.js';
 import { openDashboard } from './dashboard.js';
 import { openReport } from './report.js';
 import { initBuilds, onBuildEvent, buildFor, startBuild, openBuilds, buildIcon, formatSeq } from './builds.js';
@@ -410,12 +410,14 @@ function liftBlock(idea) {
     ];
   })() : null;
   let task = null;
-  if (idea.liftType) {
+  const arm = armOf(idea);
+  if (arm) {
     const parent = S.ideas.get(idea.liftFrom);
-    const hit = liftHit(idea);
-    task = h('div', { class: 'lift-task' },
+    const hit = armHit(idea);
+    const key = arm === 'placebo' ? 'liftTaskPlacebo' : arm === 'none' ? 'liftTaskNone' : 'liftTask';
+    task = h('div', { class: `lift-task arm-${arm}` },
       h('button', { class: 'linkish', disabled: !parent, onclick: () => parent && graph.h.select(parent.id) },
-        t('liftTask', { p: parent ? `"${parent.title}"` : '?', type: typeName(idea.liftType) })),
+        t(key, { p: parent ? `"${parent.title}"` : '?', type: idea.liftType ? typeName(idea.liftType) : '' })),
       h('div', { class: hit == null ? 'muted' : hit ? 'lift-hit' : 'lift-miss' },
         hit == null ? t('liftTaskPending') : hit ? t('liftTaskHit') : t('liftTaskMiss')),
     );
@@ -481,16 +483,34 @@ async function askRetrial(id, btn) {
   }
 }
 
-/** Overview: hits per recipe type on this board. */
+/**
+ * Overview: placebo trials. Hits per recipe type in the recipe arm and the
+ * placebo arm side by side, the no-task arm in total, and a plain reading of
+ * whether recipes beat chance yet.
+ */
 function liftOverview(ideas) {
-  const stats = liftStats(ideas);
-  const tried = LIFT_TYPES.filter((type) => stats[type].tries);
-  if (!tried.length && !ideas.some((i) => i.recipe)) return null;
+  const stats = trialStats(ideas);
+  const any = ARMS.some((a) => stats[a].total.tries);
+  if (!any && !ideas.some((i) => i.recipe)) return null;
+  const cell = (c) => h('td', { class: c.tries ? '' : 'muted' },
+    c.tries ? `${c.hits}/${c.tries}` : '–',
+    c.tries ? h('span', { class: 'muted' }, ` ${Math.round((100 * c.hits) / c.tries)}%`) : null);
+  const v = trialVerdict(stats);
+  const pct = (c) => (c.tries ? Math.round((100 * c.hits) / c.tries) : 0);
   return h('div', { class: 'evo lift-overview' },
-    h('span', { class: 'muted' }, t('liftOverview')),
-    tried.length
-      ? h('div', {}, tried.map((type) => `${t(type)} ${stats[type].hits}/${stats[type].tries}`).join(' · '))
-      : h('div', { class: 'muted' }, t('liftNoData')),
+    h('span', { class: 'muted', title: t('trialHint') }, t('trialTitle')),
+    !any ? h('div', { class: 'muted' }, t('liftNoData')) : h('table', { class: 'trial' },
+      h('thead', {}, h('tr', {}, h('th', {}, ''), h('th', {}, t('armRecipe')), h('th', {}, t('armPlacebo')))),
+      h('tbody', {},
+        LIFT_TYPES.map((type) => h('tr', {}, h('th', {}, t(type)), cell(stats.recipe.byType[type]), cell(stats.placebo.byType[type]))),
+        h('tr', { class: 'trial-total' }, h('th', {}, t('armTotal')), cell(stats.recipe.total), cell(stats.placebo.total)),
+        h('tr', {}, h('th', {}, t('armNone')), cell(stats.none.total), h('td', {}, '')),
+      ),
+    ),
+    any ? h('div', { class: `trial-verdict ${v.verdict}` },
+      v.verdict === 'early'
+        ? t('trialEarly', { n: TRIAL_MIN, r: stats.recipe.total.tries, p: stats.placebo.total.tries })
+        : t(`trial_${v.verdict}`, { r: pct(stats.recipe.total), p: pct(stats.placebo.total) })) : null,
   );
 }
 

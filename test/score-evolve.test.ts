@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { clampScore, fitness, medal, medalFromSum, scoreSum, onMedalEdge, confidenceBand, retrialSum } from '../public/js/score.js';
 import {
   breedScore, doubtPenalty, evolutionStats, expandedIds, liftHit, liftRate, liftStats, nextMove, pairKey, pickRecipe, recipeOf, usedPairs,
+  assignArm, armOf, armHit, trialStats, trialVerdict, PLACEBO_RATE, TRIAL_MIN,
 } from '../public/js/evolve.js';
 
 const idea = (id: number, sum: number | null, extra: any = {}) => {
@@ -157,6 +158,63 @@ test('a cross takes the recipe whose type has lifted more often', () => {
   assert.equal(pickRecipe(a, b, { ...none, impact: { tries: 3, hits: 3 } }).from.id, 2);
   assert.equal(pickRecipe(idea(3, 10), b, none).from.id, 2, 'only one parent has a recipe');
   assert.equal(pickRecipe(idea(3, 10), idea(4, 10), none), null);
+});
+
+// ---------------------------------------------------------------- placebo trials
+
+test('placebo trials: about one recipe breed in five gets the placebo, same type, base and parent, no change', () => {
+  const p = idea(1, 10, { recipeType: 'impact', recipe: 'Name the user.' });
+  assert.deepEqual(
+    (({ arm, type, change, base }) => ({ arm, type, change, base }))(assignArm([p], {}, () => 0)!),
+    { arm: 'placebo', type: 'impact', change: null, base: 1 },
+  );
+  const r = assignArm([p], {}, () => 0.99)!;
+  assert.deepEqual([r.arm, r.change, r.from.id], ['recipe', 'Name the user.', 1]);
+  const rng = rngFrom(3);
+  let placebos = 0;
+  for (let n = 0; n < 4000; n++) if (assignArm([p], {}, rng)!.arm === 'placebo') placebos++;
+  assert.ok(Math.abs(placebos / 4000 - PLACEBO_RATE) < 0.03, `placebo share ${placebos / 4000}`);
+
+  // A cross keeps pickRecipe's choice; the placebo replaces it whole.
+  const q = idea(2, 12, { recipeType: 'originality', recipe: 'B' });
+  const stats = { originality: { tries: 4, hits: 4 }, feasibility: { tries: 0, hits: 0 }, impact: { tries: 4, hits: 0 } };
+  const c = assignArm([p, q], stats, () => 0)!;
+  assert.deepEqual([c.arm, c.type, c.from.id, c.base], ['placebo', 'originality', 2, 2]);
+});
+
+test('placebo trials: no recipe means the no-task arm against the best parent below gold; gold or unjudged parents, no arm', () => {
+  const none = assignArm([idea(1, 9), idea(2, 11)], {}, () => 0)!;
+  assert.deepEqual([none.arm, none.type, none.change, none.from.id, none.base], ['none', null, null, 2, 2]);
+  assert.equal(assignArm([idea(1, 9), idea(2, 13)], {}, () => 0)!.from.id, 1, 'a gold parent cannot be lifted');
+  assert.equal(assignArm([idea(1, 14)], {}, () => 0), null);
+  assert.equal(assignArm([idea(1, null)], {}, () => 0), null);
+});
+
+test('placebo trials: hits per arm and type, only the recipe arm feeds liftStats, and the verdict waits for data', () => {
+  const ideas = [
+    idea(1, 11, { liftType: 'impact', liftBase: 1 }), // older idea, no arm stored: recipe arm, hit
+    idea(2, 10, { liftType: 'impact', liftBase: 1, liftArm: 'recipe' }), // miss
+    idea(3, 11, { liftType: 'impact', liftBase: 1, liftArm: 'placebo' }), // placebo hit
+    idea(4, 9, { liftType: null, liftBase: 0, liftArm: 'none' }), // no-task hit
+    idea(5, null, { liftType: 'impact', liftBase: 1, liftArm: 'placebo' }), // not judged
+    idea(6, 12), // not in a trial
+  ];
+  assert.deepEqual(ideas.map(armOf), ['recipe', 'recipe', 'placebo', 'none', 'placebo', null]);
+  assert.deepEqual(ideas.map(armHit), [true, false, true, true, null, null]);
+  assert.deepEqual(ideas.map(liftHit), [true, false, null, null, null, null]);
+  assert.deepEqual(liftStats(ideas).impact, { tries: 2, hits: 1 });
+  const s = trialStats(ideas);
+  assert.deepEqual(s.recipe.byType.impact, { tries: 2, hits: 1 });
+  assert.deepEqual(s.placebo.total, { tries: 1, hits: 1 });
+  assert.deepEqual(s.none.total, { tries: 1, hits: 1 });
+  assert.equal(trialVerdict(s).verdict, 'early');
+
+  const arm = (hits: number, tries: number) => ({ total: { hits, tries }, byType: {} });
+  const v = (r: any, p: any) => trialVerdict({ recipe: r, placebo: p, none: arm(0, 0) } as any);
+  assert.equal(v(arm(6, 10), arm(2, 10)).verdict, 'ahead');
+  assert.equal(v(arm(3, 10), arm(3, 10)).verdict, 'even');
+  assert.equal(v(arm(1, 10), arm(5, 10)).verdict, 'behind');
+  assert.equal(v(arm(9, 10), arm(1, TRIAL_MIN - 1)).verdict, 'early');
 });
 
 test('the hit-rate nudge breaks ties in selection but never beats a point of jury score', () => {

@@ -53,7 +53,7 @@ export const LIFT_TYPES = CRITERIA;
 export function liftStats(ideas) {
   const out = Object.fromEntries(LIFT_TYPES.map((t) => [t, { tries: 0, hits: 0 }]));
   for (const i of ideas) {
-    const hit = liftHit(i);
+    const hit = liftHit(i); // recipe arm only: a placebo's luck must not steer breeding
     if (hit == null) continue;
     out[i.liftType].tries++;
     if (hit) out[i.liftType].hits++;
@@ -67,11 +67,85 @@ export function liftRate(stats, type) {
   return s ? (s.hits + 1) / (s.tries + 2) : 0.5;
 }
 
-/** Did this bred idea's recipe lift the medal? null: no recipe task, or not judged yet. */
+/** Did this bred idea's recipe lift the medal? null: no recipe task (placebo and no-task children too), or not judged yet. */
 export function liftHit(idea) {
-  if (!LIFT_TYPES.includes(idea?.liftType) || !Number.isInteger(idea?.liftBase)) return null;
+  if (armOf(idea) !== 'recipe' || !LIFT_TYPES.includes(idea?.liftType)) return null;
+  return armHit(idea);
+}
+
+// ---------------------------------------------------------------- placebo trials
+//
+// Do recipes beat chance? Borrowed from clinical trials: some breeds that
+// would have been handed a recipe are randomly handed a placebo instead, a
+// vague "improve it", and remember which recipe type was withheld. Breeds
+// from parents below gold that have no recipe at all are a third, no-task arm.
+// Every arm counts a hit the same way: the child's medal above liftBase.
+// Only the recipe arm feeds liftStats(), so placebos never steer breeding.
+
+/** Share of recipe breeds that get the placebo instead. */
+export const PLACEBO_RATE = 0.2;
+export const ARMS = ['recipe', 'placebo', 'none'];
+
+/** Which arm a bred idea belongs to. Ideas from before the trials that carry a recipe type were recipe breeds. */
+export function armOf(idea) {
+  if (ARMS.includes(idea?.liftArm)) return idea.liftArm;
+  return idea?.liftType ? 'recipe' : null;
+}
+
+/** Did the medal rise above the parent's, whatever the arm? null: in no arm, or not judged yet. */
+export function armHit(idea) {
+  if (!armOf(idea) || !Number.isInteger(idea?.liftBase)) return null;
   const m = medal(idea);
   return m == null ? null : m > idea.liftBase;
+}
+
+/**
+ * The arm and task for a new breed from these parents (one for expand, two
+ * for a cross). With a recipe: the recipe, or with chance PLACEBO_RATE the
+ * placebo (same type, base and parent, no change). Without one: the no-task
+ * arm, measured against the best parent below gold. null when no parent can
+ * be lifted (all gold or unjudged).
+ * @returns {{arm, type, change, from, base} | null}
+ */
+export function assignArm(parents, stats, rng = Math.random) {
+  const r = parents.length === 2 ? pickRecipe(parents[0], parents[1], stats) : recipeOf(parents[0]);
+  if (r) return rng() < PLACEBO_RATE ? { ...r, arm: 'placebo', change: null } : { ...r, arm: 'recipe' };
+  const liftable = parents.filter((p) => medal(p) != null && medal(p) < 3);
+  if (!liftable.length) return null;
+  const from = liftable.reduce((a, b) => (medal(b) > medal(a) ? b : a));
+  return { arm: 'none', type: null, change: null, from, base: medal(from) };
+}
+
+/** Per arm: hits and tries per recipe type (recipe, placebo) and in total (all three). */
+export function trialStats(ideas) {
+  const cell = () => ({ tries: 0, hits: 0 });
+  const out = Object.fromEntries(ARMS.map((a) => [a, { total: cell(), byType: Object.fromEntries(LIFT_TYPES.map((t) => [t, cell()])) }]));
+  for (const i of ideas) {
+    const hit = armHit(i);
+    if (hit == null) continue;
+    const arm = out[armOf(i)];
+    for (const c of [arm.total, arm.byType[i.liftType]]) {
+      if (!c) continue;
+      c.tries++;
+      if (hit) c.hits++;
+    }
+  }
+  return out;
+}
+
+/** Fewer judged children than this in either arm, and the comparison says "too early". */
+export const TRIAL_MIN = 10;
+
+/**
+ * Recipe arm against placebo arm, in total: the difference in raw hit rate,
+ * or why there is none yet. Not a significance test; a plain reading.
+ * @returns {{verdict:'early'|'ahead'|'even'|'behind', diff:number|null}}
+ */
+export function trialVerdict(stats) {
+  const r = stats.recipe.total, p = stats.placebo.total;
+  if (r.tries < TRIAL_MIN || p.tries < TRIAL_MIN) return { verdict: 'early', diff: null };
+  const diff = r.hits / r.tries - p.hits / p.tries;
+  return { verdict: diff > 0.1 ? 'ahead' : diff < -0.1 ? 'behind' : 'even', diff };
 }
 
 /** The recipe an idea can hand on: it needs one, and gold has no next medal to reach. */
