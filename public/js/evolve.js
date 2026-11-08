@@ -5,7 +5,7 @@
 // instead, expanding a strong idea that has not been expanded yet, which
 // brings new material into the pool.
 
-import { fitness, medal, CRITERIA, confidenceBand } from './score.js';
+import { fitness, medal, CRITERIA, confidenceBand, scoreSum } from './score.js';
 
 export const pairKey = (a, b) => (a < b ? `${a}-${b}` : `${b}-${a}`);
 
@@ -518,4 +518,64 @@ export function styleStats(ideas) {
     c.early = c.n < STYLE_MIN;
   }
   return out;
+}
+
+// ---------------------------------------------------------------- wording gap
+//
+// Blinded peer review (build 0011): the judge model rewrites an idea in plain
+// wording and the ordinary jury prompt scores the rewrite, blind. The gap is
+// the jury's sum minus the plain sum. A gap above PLAIN_GAP (the judge's
+// run-to-run spread is about 1) means the wording, not the substance, carried
+// the score: the idea is "style-carried". Measured, never used to steer.
+
+/** A gap above this many points marks an idea style-carried. */
+export const PLAIN_GAP = 1;
+/** The overview lists at most this many keywords. */
+export const WORDING_TOP = 8;
+
+/** The jury's sum minus the plain rewrite's sum. null: no rescore, or the idea is not judged. */
+export function plainGap(idea) {
+  const p = idea?.plain;
+  const s = scoreSum(idea);
+  if (s == null || !p || !CRITERIA.every((c) => Number.isInteger(p[c]))) return null;
+  return s - (p.originality + p.feasibility + p.impact);
+}
+
+/** Did the wording carry the score (gap above PLAIN_GAP)? null: no rescore. */
+export function styleCarried(idea) {
+  const g = plainGap(idea);
+  return g == null ? null : g > PLAIN_GAP;
+}
+
+/**
+ * Rescored ideas in total and per first keyword: n, how many are
+ * style-carried with the rate, and the mean gap. Keywords sorted by n (ties
+ * alphabetical), at most WORDING_TOP; ideas with no keyword count in the total only.
+ * @returns {{n:number, carried:number, rate:number|null, meanGap:number|null, keywords:{keyword:string, n:number, carried:number, rate:number, meanGap:number}[]}}
+ */
+export function wordingStats(ideas) {
+  const row = () => ({ n: 0, carried: 0, gapSum: 0 });
+  const total = row();
+  const by = new Map();
+  for (const i of ideas) {
+    const g = plainGap(i);
+    if (g == null) continue;
+    const rows = [total];
+    const kw = i.keywords?.[0];
+    if (kw) {
+      if (!by.has(kw)) by.set(kw, row());
+      rows.push(by.get(kw));
+    }
+    for (const r of rows) {
+      r.n++;
+      r.gapSum += g;
+      if (g > PLAIN_GAP) r.carried++;
+    }
+  }
+  const fin = (r) => ({ n: r.n, carried: r.carried, rate: r.n ? r.carried / r.n : null, meanGap: r.n ? r.gapSum / r.n : null });
+  const keywords = [...by.entries()]
+    .sort((a, b) => b[1].n - a[1].n || a[0].localeCompare(b[0]))
+    .slice(0, WORDING_TOP)
+    .map(([keyword, r]) => ({ keyword, ...fin(r) }));
+  return { ...fin(total), keywords };
 }

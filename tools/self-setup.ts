@@ -68,6 +68,7 @@ await api('PATCH', `/api/boards/${board.id}`, {
     lang: 'en',
     selfImprove: true,
     autoProjectOnGold: false,
+    wordingGap: true, // build 0011: every verdict also gets a blind rescore of a plain rewrite
     buildsPerDay: 4,
     buildModel: 'opus',
     judgeGuidance: JURY,

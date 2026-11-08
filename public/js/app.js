@@ -10,6 +10,7 @@ import {
   evolutionStats, liftStats, LIFT_TYPES, doubtPenalty, armOf, armHit, trialStats, trialVerdict, ARMS, TRIAL_MIN,
   diversity, diversitySeries, pressureStats, MONOCULTURE_SHARE, DIVERSITY_WINDOW, netLiftStats, CONTROL_EVERY,
   appliedStatus, appliedStats, APPLIED_STATUSES, duelHit, duelStats, STYLES, STYLE_MIN, styleStats,
+  plainGap, styleCarried, wordingStats, PLAIN_GAP,
 } from './evolve.js';
 
 /** A net lift in medal steps, signed, two decimals: +0.33, −0.50, ±0.00. */
@@ -487,6 +488,73 @@ function doubtBlock(idea) {
   );
 }
 
+/** Signed whole points: +2, −1, ±0. */
+const signedPts = (x) => (x > 0 ? '+' : x < 0 ? '−' : '±') + Math.abs(x);
+
+/**
+ * Wording gap (build 0011): the jury's sum against a blind rescore of a plain
+ * rewrite, the verdict (style-carried above PLAIN_GAP), and the rewrite
+ * itself. Before a rescore, just the button that asks for one.
+ */
+function plainBlock(idea) {
+  if (S.judging.has(idea.id) || !isJudged(idea)) return null;
+  const p = idea.plain;
+  const gap = plainGap(idea);
+  const ask = h('button', { class: 'btn small', title: t('plainHint', { n: PLAIN_GAP }), onclick: (ev) => askPlain(idea.id, ev.currentTarget) },
+    p ? t('plainAgain') : t('plainAsk'));
+  const head = h('div', { class: 'doubt-head', title: t('plainHint', { n: PLAIN_GAP }) }, `¶ ${t('plainTitle')}`);
+  if (!p || gap == null) return h('div', { class: 'plain' }, head, ask);
+  const carried = styleCarried(idea);
+  const plainSum = CRITERIA.reduce((s, c) => s + p[c], 0);
+  return h('div', { class: `plain ${carried ? 'carried' : 'holds'}` }, head,
+    h('div', { class: 'doubt-line' },
+      t('plainLine', { first: scoreSum(idea), plain: plainSum, gap: signedPts(gap) }),
+      h('span', { class: 'muted' }, ` (${CRITERIA.map((c) => p[c]).join('·')}, ${p.model})`)),
+    h('div', { class: `plain-verdict ${carried ? 'carried' : 'holds'}` },
+      carried ? `⚠ ${t('plainCarried', { gap })}` : t(gap < 0 ? 'plainHelped' : 'plainHolds', { n: PLAIN_GAP })),
+    h('div', { class: 'plain-text' }, h('strong', {}, p.title), ': ', p.pitch),
+    p.reason ? h('p', { class: 'reason' }, p.reason) : null,
+    ask,
+  );
+}
+
+async function askPlain(id, btn) {
+  if (btn) { btn.disabled = true; btn.textContent = t('plainBusy'); }
+  try {
+    await api('POST', `/api/ideas/${id}/plain`, {});
+  } catch (e) {
+    fail(e);
+    if (btn) { btn.disabled = false; btn.textContent = t('plainAsk'); }
+  }
+}
+
+/**
+ * Overview: per first keyword, how many rescored ideas are style-carried and
+ * the mean wording gap. Measured only. null until some idea has a rescore.
+ */
+function wordingOverview(ideas) {
+  const s = wordingStats(ideas);
+  if (!s.n) return null;
+  const pct = (r) => (r == null ? '–' : `${Math.round(100 * r)}%`);
+  const gapTxt = (g) => (g == null ? '–' : (g > 0 ? '+' : g < 0 ? '−' : '±') + Math.abs(g).toFixed(1));
+  const row = (label, r, cls = '') => h('tr', { class: cls },
+    h('th', {}, label),
+    h('td', {}, String(r.n)),
+    h('td', { class: r.carried ? 'plain-carried-cell' : '' }, `${r.carried}/${r.n} ${pct(r.rate)}`),
+    h('td', {}, gapTxt(r.meanGap)));
+  return h('div', { class: 'evo wording-overview' },
+    h('span', { class: 'muted', title: t('plainHint', { n: PLAIN_GAP }) }, t('wordingTitle')),
+    h('table', { class: 'trial wording-table' },
+      h('thead', {}, h('tr', {}, h('th', {}, t('wordingKeyword')), h('th', {}, 'n'), h('th', {}, t('wordingCarried')), h('th', {}, t('wordingGap')))),
+      h('tbody', {},
+        s.keywords.map((k) => row(k.keyword, k)),
+        row(t('armTotal'), s, 'trial-total'),
+      ),
+    ),
+    h('small', { class: 'muted' }, t('wordingNote', { n: PLAIN_GAP })),
+  );
+}
+
 async function askRetrial(id, btn) {
   if (btn) btn.disabled = true;
   try {
@@ -712,6 +780,7 @@ function renderIdea(idea) {
     idea.sourceUrl ? h('a', { class: 'source', href: idea.sourceUrl, target: '_blank', rel: 'noopener noreferrer' }, `${t('source')} ↗`) : null,
     scoreBlock(idea),
     doubtBlock(idea),
+    plainBlock(idea),
     idea.escape
       ? h('p', { class: 'escape-note', title: t('divHint', { pct: Math.round(MONOCULTURE_SHARE * 100), n: DIVERSITY_WINDOW }) },
           `🌱 ${t('escapeNote', { kw: idea.escape })}`,
@@ -828,6 +897,7 @@ function renderOverview() {
     diversityOverview(ideas),
     liftOverview(ideas),
     styleOverview(ideas),
+    wordingOverview(ideas),
     h('section', { class: 'summary' },
       h('div', { class: 'row space' }, h('h3', {}, t('summary')),
         ideas.length >= 2 ? h('button', { class: 'btn small', onclick: (ev) => summarize(ev.currentTarget) }, s ? t('resummarize') : t('summarize')) : null),
@@ -972,6 +1042,7 @@ async function boardSettingsDialog() {
   const guidance = area(c.judgeGuidance, 2, { placeholder: t('judgeGuidancePh') });
   const autoProj = h('input', { type: 'checkbox', checked: c.autoProjectOnGold });
   const selfOn = h('input', { type: 'checkbox', checked: c.selfImprove });
+  const wordingOn = h('input', { type: 'checkbox', checked: !!c.wordingGap });
   const buildsPerDay = inp(c.buildsPerDay, { type: 'number', min: 0, max: 50 });
   const buildModel = inp(c.buildModel, { placeholder: 'opus' });
   const xOn = h('input', { type: 'checkbox', checked: c.researchers.x.enabled }), xFocus = inp(c.researchers.x.focus, { placeholder: t('focusPh') });
@@ -1006,7 +1077,8 @@ async function boardSettingsDialog() {
       }, t('saveAsTemplate')),
     ),
     h('fieldset', {}, h('legend', {}, t('jury')), field(t('judgeGuidance'), guidance),
-      h('label', { class: 'check' }, autoProj, t('autoProject'))),
+      h('label', { class: 'check' }, autoProj, t('autoProject')),
+      h('label', { class: 'check', title: t('plainHint', { n: PLAIN_GAP }) }, wordingOn, t('wordingGapOn'))),
     h('fieldset', {}, h('legend', {}, t('selfImprove')),
       h('label', { class: 'check' }, selfOn, t('selfImproveOn')),
       h('div', { class: 'grid2' }, field(t('buildsPerDay'), buildsPerDay), field(t('buildModel'), buildModel)),
@@ -1042,7 +1114,7 @@ async function boardSettingsDialog() {
           title: title.value, goal: goal.value,
           config: {
             lang: lang.value, flowName: flowName.value, flow: { system: sys.value, expand: exp.value, combine: comb.value },
-            judgeGuidance: guidance.value, autoProjectOnGold: autoProj.checked,
+            judgeGuidance: guidance.value, autoProjectOnGold: autoProj.checked, wordingGap: wordingOn.checked,
             selfImprove: selfOn.checked, buildsPerDay: Number(buildsPerDay.value), buildModel: buildModel.value,
             researchers: { x: { enabled: xOn.checked, focus: xFocus.value }, research: { enabled: rOn.checked, focus: rFocus.value } },
             mode: mode.value, autopilotSeconds: Number(pace.value), rate: { stepsPerHour: Number(sph.value), usdPerDay: Number(usd.value) },
