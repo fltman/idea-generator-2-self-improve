@@ -1,0 +1,86 @@
+{
+  "seq": 14,
+  "title": "Every-View Pause Banner With Priced Resume",
+  "pitch": "A banner on every board view names the tripped cap, its value and resume time. One \"Resume +$X\" click raises that cap by X, where X is the average cost per medal times a medal target. The banner shows the forecast of medals.",
+  "status": "merged",
+  "trigger": "hand",
+  "branch": "build/0014-every-view-pause-banner-with-priced-resu",
+  "commit": null,
+  "summary": "Added a pause banner that sits above every view (canvas, Trends, Report, Builds) when the autopilot stops at a cap: the board's daily budget, the global daily budget or steps per hour. It names the cap, the spend or steps against it, and when it lifts by itself. One 'Resume +$X → $Y/day' button raises the cap, priced at 3 × the board's cost per medal from the flight recorder (above today's spend, so overshoot is covered), with a forecast like '≈ 3.2 medals at $0.043 per medal'. With no cost data it raises by 25% and says it isn't priced. The logic is a pure module (public/js/pause.js) with 8 new tests, including an integration test where a real autopilot stops at its budget and resumes after the raise. 140 tests pass. No server changes.",
+  "error": null,
+  "costUsd": 2.18,
+  "sessionId": "6642fee6-28b6-48da-80b3-2bc82fa75523",
+  "createdAt": "2026-11-08 19:37:40",
+  "startedAt": "2026-11-08 19:37:40",
+  "finishedAt": "2026-11-08 19:44:12",
+  "jury": {
+    "originality": 3,
+    "feasibility": 4,
+    "impact": 4,
+    "reason": "Fits the goal well: it removes the surprise of a silently paused autopilot, with a priced one-click resume; but the banner and cap raise are familiar patterns, and the forecast relies on thin cost data."
+  },
+  "lineage": [
+    {
+      "kind": "combine",
+      "title": "Paused Banner Lights What Stalled",
+      "pitch": "Lena opens her board to a paused-autopilot banner naming the tripped limit, value and resume time. \"Raise cap and resume\" confirms old/new cap and next-hour USD, and \"Trace\" lights the last-bred idea's ancestry. The trace URL records the pause."
+    },
+    {
+      "kind": "expand",
+      "title": "Break-Even Cap With Medal Forecast Preview",
+      "pitch": "Priya hits the daily cap and the banner offers three caps priced from per-role cost per medal and the board's recent medal rate, each with a forecast of golds and an uncertainty range. After resuming, the overview compares forecast with actual medals earned."
+    },
+    {
+      "kind": "expand",
+      "title": "Git Blame for Ideas: Trace Link",
+      "pitch": "As git blame traces a line to its commits, a 'Trace' button in the idea panel lights the idea's full ancestry back to its seeds and descendants forward, and copies a shareable ?trace=ID URL that reopens the same lit view."
+    },
+    {
+      "kind": "combine",
+      "title": "Tripped-Limit Banner With Raise-and-Resume",
+      "pitch": "Lena opens her board at breakfast and sees the autopilot paused. The banner names the tripped limit, its current value and resume time, and has one button. Raise cap and resume shows old cap, new cap and next-hour USD, then confirms."
+    },
+    {
+      "kind": "combine",
+      "title": "One-Click Cap Raise on Pause Banner",
+      "pitch": "Maya opens a paused board and the banner reads \"Paused: USD per day, $4.00 hit.\" It projects next hour at $0.90 from the last hour's spend. One \"Raise 25% to $5.00 and resume\" confirm applies it. No export; built for board owners."
+    },
+    {
+      "kind": "seed",
+      "title": "Type a word and only the matching ideas stay lit on the canvas; filter by medal or by age with one click.",
+      "pitch": ""
+    },
+    {
+      "kind": "combine",
+      "title": "Named Views That Play as Lineage Tours",
+      "pitch": "Lena pins #63, filters gold, names the view \"Why recipes won\" and copies one link. Maria opens it: the canvas centers on #63 and a stepper walks ancestor to descendant with each jury reason, in a saved chip. Hash round-trip tested."
+    },
+    {
+      "kind": "combine",
+      "title": "Circuit Breaker Banner With Reset Preview",
+      "pitch": "Like an electrical panel that names the tripped breaker, shows when it can reset, and rates the load before you flip it: the pause banner names the cause and resume countdown, offers \"Raise cap and resume now\" previewing the next hour's extra USD, and saves a #-pinned view of the stalled lineage."
+    },
+    {
+      "kind": "combine",
+      "title": "Pinned Lineage Exported as Offline Story",
+      "pitch": "Typing #63 in the canvas filter pins its ancestors and descendants (?lineage=63). An \"Export story\" button then writes one self-contained HTML file: the pinned tree, embedded timeline of each ancestor's score and medal change, no server needed. Tested by opening it offline."
+    },
+    {
+      "kind": "combine",
+      "title": "Circuit-Breaker Reset Panel With Story",
+      "pitch": "Like an electrical panel whose tripped breaker is labelled and has a reset switch, a paused board's banner names the tripped limit, projects next-hour cost at a cap +25%, and on confirm raises it and resumes. The pause row also saves a pinned-lineage story export."
+    },
+    {
+      "kind": "expand",
+      "title": "Guided Tour Link From Pinned Lineage",
+      "pitch": "Lena pins #63 and clicks 'Copy link'. Her colleague opens it and the canvas centers on #63, then steps through each ancestor to descendant with the jury reason beside each, as a walkthrough of how the idea evolved. Link carries the view."
+    },
+    {
+      "kind": "combine",
+      "title": "Filter Box That Saves Named Hash Views",
+      "pitch": "Maria types \"#63\" in the canvas filter, adds gold, names the view \"Why recipes won\" with a note, and copies the link. The URL hash holds pin, filter, tab and note; a per-board views table shows chips. Tested with hash round trip."
+    }
+  ],
+  "filmLine": "The banner asked for fourteen cents, not the thirteen the builder expected, and it was right: the board had already overspent its cap by less than half a cent.",
+  "tests": "✔ spores off: the autopilot never sends anything (16.745958ms)\n✔ autopilot: an idea that is built or being built never leaves as a spore (13.025667ms)\n✔ sporeRested: one spore per board per hour (0.112917ms)\n✔ autopilot: a board that breeds fast still sends at most one spore an hour (37.452792ms)\nℹ tests 140\nℹ suites 0\nℹ pass 140\nℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 5997.333209"
+}
