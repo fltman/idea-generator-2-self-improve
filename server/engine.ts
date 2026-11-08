@@ -12,7 +12,7 @@ import { fetchPapers as realFetchPapers, researchLeads, xLeads } from './leads.t
 import { writeBrief, writeProject } from './project.ts';
 import { ProviderError, type AppSettings, type ChatFn, type Role } from './providers.ts';
 import { fitness, isJudged, medal, scoreSum, onMedalEdge, goldGate } from '../public/js/score.js';
-import { nextMove, assignArm, liftStats } from '../public/js/evolve.js';
+import { nextMove, assignArm, liftStats, armOf, controlDue } from '../public/js/evolve.js';
 
 export class AppError extends Error {
   status: number;
@@ -308,14 +308,15 @@ export function createEngine(deps: Deps) {
     return { ideas: created, edges };
   }
 
-  async function doCombine(boardId: number, aId: number, bId: number, escape: string | null = null) {
+  /** `forced`: a task chosen by the caller instead of assignArm's (the autopilot's control sibling). */
+  async function doCombine(boardId: number, aId: number, bId: number, escape: string | null = null, forced: ReturnType<typeof assignArm> = null) {
     const board = mustBoard(boardId);
     if (!Number.isInteger(aId) || !Number.isInteger(bId) || aId === bId) throw new AppError(400, 'bad_pair', 'Pick two different ideas');
     const a = mustIdea(aId);
     const c = mustIdea(bId);
     if (a.boardId !== board.id || c.boardId !== board.id) throw new AppError(400, 'bad_pair', 'Ideas belong to another board');
     // Of the two parents' recipes, the type that has lifted medals more often on this board (or, by lot, the placebo).
-    const task = assignArm([a, c], liftStats(repo.listIdeas(board.id)), trialRng);
+    const task = forced ?? assignArm([a, c], liftStats(repo.listIdeas(board.id)), trialRng);
     const { idea } = await call(board.id, () =>
       llm.combine({ model: modelFor(board, 'combine'), flow: flowFor(board), board: ctxOf(board), a, b: c, existingTitles: titles(board.id), lang: board.config.lang, task }),
     );
@@ -573,8 +574,18 @@ export function createEngine(deps: Deps) {
         return { did: 'expand', ids: r.ideas.map((i) => i.id) };
       }
       const r = await doCombine(boardId, move.a.id, move.b.id, move.escape ?? null);
-      await judgeAll([r.idea.id]);
-      return { did: 'combine', ids: [r.idea.id] };
+      const ids = [r.idea.id];
+      // Every CONTROL_EVERY-th recipe cross gets a control sibling: the same parents, no task,
+      // the withheld recipe type and the same base, so netLiftStats() can subtract chance.
+      const recipeCrosses = repo.listIdeas(boardId).filter((i) => i.kind === 'combine' && armOf(i) === 'recipe').length;
+      if (armOf(r.idea) === 'recipe' && controlDue(recipeCrosses)) {
+        const from = mustIdea(r.idea.liftFrom!);
+        const control = { arm: 'control', type: r.idea.liftType, change: null, from, base: r.idea.liftBase! };
+        const sib = await doCombine(boardId, move.a.id, move.b.id, move.escape ?? null, control);
+        ids.push(sib.idea.id);
+      }
+      await judgeAll(ids);
+      return { did: 'combine', ids };
     },
   };
 }

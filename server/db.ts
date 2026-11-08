@@ -301,7 +301,7 @@ export type Idea = {
   liftType: string | null;
   liftFrom: number | null;
   liftBase: number | null;
-  /** Placebo trials: 'recipe', 'placebo' (a vague "improve it" instead of the recipe; liftType is the withheld type) or 'none' (the parent had no recipe; liftType null). null: older idea, or not bred toward a medal. */
+  /** Placebo trials: 'recipe', 'placebo' (a vague "improve it" instead of the recipe; liftType is the withheld type), 'none' (the parent had no recipe; liftType null) or 'control' (the autopilot's no-task sibling of a recipe cross; liftType the withheld type). null: older idea, or not bred toward a medal. */
   liftArm: string | null;
   /** Diversity pressure: the dominant keyword of the monoculture the autopilot bred this idea outside of. null: an ordinary breed. */
   escape: string | null;

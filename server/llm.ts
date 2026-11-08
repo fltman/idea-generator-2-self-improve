@@ -26,8 +26,8 @@ export const PLACEBO_TASK = 'Your task: improve it.';
 
 /** The task line for a child bred under a lift recipe. */
 function liftTaskText(t: LiftTask | null | undefined, many = false) {
-  // The no-task arm gets nothing; the placebo arm gets a vague task with no criterion and no recipe.
-  if (!t || t.arm === 'none' || !t.change) return t?.arm === 'placebo' ? PLACEBO_TASK : '';
+  // The no-task arm and the control sibling get nothing; the placebo arm gets a vague task with no criterion and no recipe.
+  if (!t || t.arm === 'none' || t.arm === 'control' || !t.change) return t?.arm === 'placebo' ? PLACEBO_TASK : '';
   return [
     `The jury's lift recipe for "${t.from.title}" (the one change that would earn it the next medal, by raising its ${t.type}):`,
     t.change,
