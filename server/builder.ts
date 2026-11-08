@@ -529,7 +529,11 @@ export function createBuilder(deps: Deps) {
     pumping = true;
     try {
       let next: Build | undefined;
-      while (!active && (next = repo.buildsWithStatus('queued')[0])) await runBuild(next);
+      while (!active && (next = repo.buildsWithStatus('queued')[0])) {
+        // A merge restarts the server under `npm run dev`: the next build would die with it
+        // (build 0006 did). Leave the queue to the restarted server, or to the next timer tick.
+        if ((await runBuild(next))?.status === 'merged') break;
+      }
     } finally {
       pumping = false;
     }

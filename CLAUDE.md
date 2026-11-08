@@ -7,7 +7,7 @@ This fork improves itself. A self-improvement board generates changes to this ap
 ## Commands
 
 - `npm run dev` – server on http://localhost:8301 that restarts when `server/` changes. A merged build relies on this. (`npm start` does not restart.) `PORT`, `HOST` and `DB_FILE` override.
-- `npm test` – 90 tests (`node --test`), with a fake LLM, fake provider servers, a fake `claude` CLI and a fake build agent. No network.
+- `npm test` – 91 tests (`node --test`), with a fake LLM, fake provider servers, a fake `claude` CLI and a fake build agent. No network.
 - `npm run self:setup` – creates the self-improvement board on a running server.
 - `node tools/shoot.ts --out file.png [--board N] [--eval js]…` – boots this checkout's server against a copy of `data/ideas.db` (autopilot and builder off), opens headless Chrome, and saves a PNG. `--help` lists the options.
 - `npm run calibrate [-- --model provider:model]` – real judge against weak and strong reference ideas. It costs money. **Re-run it whenever the judge's prompt, schema or model changes.**

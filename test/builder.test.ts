@@ -101,6 +101,16 @@ test('a passing build is verified, merged into main, and journaled', async () =>
   assert.ok(lines.includes('$ npm test') && lines.includes('✏️ Edit server/index.ts') && lines.some((l) => l.startsWith('🎉 merged')));
 });
 
+test('after a merge the next queued build waits (the merge may restart the server)', async () => {
+  process.env.FAKE_AGENT_MODE = 'good';
+  const a = builder.enqueue(idea('First in queue').id, 'hand').build!;
+  const b = builder.enqueue(idea('Second in queue').id, 'hand').build!;
+  while (repo.getBuild(a.id)!.status !== 'merged') await new Promise((r) => setTimeout(r, 50));
+  await new Promise((r) => setTimeout(r, 300));
+  assert.equal(repo.getBuild(b.id)!.status, 'queued', 'not started in the process that just merged');
+  builder.cancel(b.id);
+});
+
 test('uncommitted work is committed for the agent and still verified', async () => {
   const b = await buildWith('nocommit', 'Lazy agent');
   assert.equal(b.status, 'merged', b.error ?? '');
@@ -113,11 +123,11 @@ test('a build whose tests fail never reaches main, but its journal does', async 
   assert.equal(b.status, 'failed');
   assert.equal(b.error, 'Tests failed');
   assert.ok(!existsSync(join(app, 'BROKEN')) && !existsSync(join(app, 'feature-broken.txt')));
-  assert.equal(git('log', '-1', '--format=%s', 'main'), 'Journal: build 0003 failed');
+  assert.equal(git('log', '-1', '--format=%s', 'main'), 'Journal: build 0004 failed');
   assert.equal(git('rev-parse', 'main~1'), head, 'only the journal commit landed');
-  const meta = JSON.parse(readFileSync(join(app, 'journal', '0003-breaks-everything', 'build.json'), 'utf8'));
+  const meta = JSON.parse(readFileSync(join(app, 'journal', '0004-breaks-everything', 'build.json'), 'utf8'));
   assert.equal(meta.status, 'failed');
-  assert.ok(existsSync(join(app, 'journal', '0003-breaks-everything', '02-after.png')), "the agent's screenshots are kept");
+  assert.ok(existsSync(join(app, 'journal', '0004-breaks-everything', '02-after.png')), "the agent's screenshots are kept");
 });
 
 test('a branch that commits node_modules or data/ is refused, never merged', async () => {
@@ -138,7 +148,7 @@ test('the linked node_modules is never committed for the agent', async () => {
 test('a declined idea is documented, not built', async () => {
   const b = await buildWith('decline', 'Impossible idea');
   assert.equal(b.status, 'declined');
-  assert.match(readFileSync(join(app, 'journal', '0006-impossible-idea', 'README.md'), 'utf8'), /Mode: decline/);
+  assert.match(readFileSync(join(app, 'journal', '0007-impossible-idea', 'README.md'), 'utf8'), /Mode: decline/);
   assert.match(readFileSync(join(app, 'journal', 'INDEX.md'), 'utf8'), /🚫 declined/);
 });
 
