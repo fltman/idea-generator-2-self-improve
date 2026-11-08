@@ -1,0 +1,61 @@
+{
+  "seq": 11,
+  "title": "Wording Gap as Peer-Review Blinding Test",
+  "pitch": "Borrowing from science: like blinded manuscript review, the judge rescores a plain rewrite, and an idea whose gap exceeds one point is flagged 'style-carried'. The overview adds a per-keyword style-carried rate beside cost-per-medal, with no steering.",
+  "status": "merged",
+  "trigger": "hand",
+  "branch": "build/0011-wording-gap-as-peer-review-blinding-test",
+  "commit": null,
+  "summary": "I built the wording gap and committed it as 8cbfbe5; all 103 tests pass. After a verdict, the judge model rewrites the idea in plain words, seeing only its text, and the normal jury prompt scores that rewrite without seeing the first verdict. The gap (jury sum minus plain sum) goes in a new `plain` column, and a gap of more than 1 point flags the idea 'style-carried'. The idea panel shows the gap, the verdict, the rewrite and a 'Rescore a plain rewrite' button that works on any board; the overview gets a table of style-carried rate and mean gap per keyword. It is measured only: the medal, breeding and the builder never read it. It is a board setting that is off by default, because it adds two calls per idea and turning it on everywhere would change what existing tests count. New boards from self:setup have it on, but the live board needs the box ticked. The app has no cost-per-medal view yet, so the table stands alone. Screenshots 03 and 04 use made-up numbers, since the screenshot tool makes no model calls; the journal says so.",
+  "error": null,
+  "costUsd": 2.61,
+  "sessionId": "4d7f036b-1eef-4422-85a6-82c2959b1cc3",
+  "createdAt": "2026-11-08 13:24:42",
+  "startedAt": "2026-11-08 13:30:17",
+  "finishedAt": "2026-11-08 13:37:32",
+  "jury": {
+    "originality": 4,
+    "feasibility": 4,
+    "impact": 3,
+    "reason": "Rescoring a plain rewrite to expose style-carried scores is a fresh, honest jury check that fits the goal; but it adds a judge call per idea and the per-keyword rate is only descriptive."
+  },
+  "lineage": [
+    {
+      "kind": "expand",
+      "title": "Plain-Rewrite Gap Column Per Keyword",
+      "pitch": "One extra judge call rewrites each judged idea in plain wording and rescores it; the score gap is stored in a new column. The overview shows one cost-per-medal chip per first keyword with n, using gap-adjusted scores. No autopilot steering."
+    },
+    {
+      "kind": "combine",
+      "title": "Style-Net Cost per Distinct Medal",
+      "pitch": "Each idea gets a style (first keyword) and one neutral-rewrite rescore, storing the score gap in a new column. Near-duplicates are skipped. The overview shows one chip per style: USD per distinct medal, using gap-adjusted scores. The autopilot favors cheap, genuine styles."
+    },
+    {
+      "kind": "combine",
+      "title": "Cost per Distinct Medal Meter",
+      "pitch": "A keyword-overlap duplicate check runs before each jury call, and medals on near-duplicates don't count. The board shows USD per distinct medal by move type. When the budget runs low, the autopilot picks the cheapest move type and skips crowded regions."
+    },
+    {
+      "kind": "expand",
+      "title": "Style-Blind Jury Control Rejudge",
+      "pitch": "Bolder: the judge model rewrites each idea into a neutral style before scoring, then compares with the original score. The overview shows each style's medal rate net of this style bias, so it separates style that helps from style that merely impresses."
+    },
+    {
+      "kind": "seed",
+      "title": "Before the jury spends a call, each new idea is checked against the board for near-duplicates of older ideas.",
+      "pitch": ""
+    },
+    {
+      "kind": "seed",
+      "title": "Show the cost per medal on each board, and let the autopilot pick cheaper moves when the budget runs low.",
+      "pitch": ""
+    },
+    {
+      "kind": "seed",
+      "title": "The breeder writes ideas in a few distinct styles and learns which style earns medals on this board.",
+      "pitch": ""
+    }
+  ],
+  "filmLine": "To find out whether its jury was being won over by nice wording, the app taught itself to strip each idea down to plain words and score it again without seeing the first verdict, the way a scientist's paper gets reviewed blind.",
+  "tests": "✔ diversity pressure: no monoculture, or nothing outside it, breeds as before (0.4445ms)\n✔ diversity gauge: the series over time, when the monoculture began, and what the pressure did (0.371125ms)\n✔ idea styles: the lot is uniform over four styles, and styleStats counts medals per style with a too-early mark (0.416333ms)\n✔ wording gap: plainGap, styleCarried and wordingStats per first keyword (5.44025ms)\nℹ tests 103\nℹ suites 0\nℹ pass 103\nℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 5329.028125"
+}
