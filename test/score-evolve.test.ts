@@ -500,3 +500,32 @@ test('idea styles: the lot is uniform over four styles, and styleStats counts me
   assert.deepEqual(s.scenario, { n: 1, medals: 1, golds: 0, rate: 1, early: true });
   assert.deepEqual(s.mechanism, { n: 0, medals: 0, golds: 0, rate: null, early: true });
 });
+
+test('wording gap: plainGap, styleCarried and wordingStats per first keyword', async () => {
+  const { plainGap, styleCarried, wordingStats, PLAIN_GAP, WORDING_TOP } = await import('../public/js/evolve.js');
+  const plain = (o: number, f: number, i: number) => ({ title: 'P', pitch: 'p', originality: o, feasibility: f, impact: i, reason: '', model: 'm', at: '' });
+  assert.equal(PLAIN_GAP, 1);
+  const a = idea(1, 12, { plain: plain(3, 3, 3), keywords: ['jury', 'x'] }); // +3
+  const b = idea(2, 10, { plain: plain(3, 3, 3), keywords: ['jury'] }); // +1: within the spread
+  const c = idea(3, 9, { plain: plain(4, 4, 3), keywords: ['canvas'] }); // −2: plain did better
+  const d = idea(4, 11, { plain: plain(3, 3, 3) }); // +2, no keyword: total only
+  const e = idea(5, null, { plain: plain(3, 3, 3), keywords: ['jury'] }); // unjudged: skipped
+  const f = idea(6, 13, { keywords: ['jury'] }); // no rescore: skipped
+  const g = idea(7, 12, { plain: { title: 'P', pitch: 'p' }, keywords: ['jury'] }); // broken rescore: skipped
+  assert.deepEqual([a, b, c, d, e, f, g].map(plainGap), [3, 1, -2, 2, null, null, null]);
+  assert.deepEqual([a, b, c, d, e, f].map(styleCarried), [true, false, false, true, null, null]);
+  // A hand-set medal does not change the gap: it compares the jury's scores.
+  assert.equal(plainGap({ ...a, medalOverride: 0 }), 3);
+  const s = wordingStats([a, b, c, d, e, f, g]);
+  assert.deepEqual([s.n, s.carried, s.rate, s.meanGap], [4, 2, 0.5, 1]);
+  assert.deepEqual(s.keywords, [
+    { keyword: 'jury', n: 2, carried: 1, rate: 0.5, meanGap: 2 },
+    { keyword: 'canvas', n: 1, carried: 0, rate: 0, meanGap: -2 },
+  ]);
+  assert.deepEqual(wordingStats([]), { n: 0, carried: 0, rate: null, meanGap: null, keywords: [] });
+  // At most WORDING_TOP keywords, by n, ties alphabetical.
+  const many = Array.from({ length: WORDING_TOP + 3 }, (_, k) => idea(10 + k, 10, { plain: plain(3, 3, 3), keywords: [`k${String.fromCharCode(122 - k)}`] }));
+  const top = wordingStats(many).keywords;
+  assert.equal(top.length, WORDING_TOP);
+  assert.deepEqual(top.slice(0, 2).map((k) => k.keyword), ['kp', 'kq']);
+});

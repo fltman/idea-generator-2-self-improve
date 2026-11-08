@@ -55,6 +55,7 @@ CREATE TABLE IF NOT EXISTS ideas (
   lift_check TEXT,
   duel TEXT,
   style TEXT,
+  plain TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS ideas_board ON ideas(board_id);
@@ -195,6 +196,8 @@ export type BoardConfig = {
   autopilotSeconds: number;
   rate: { stepsPerHour: number; usdPerDay: number };
   autoProjectOnGold: boolean;
+  /** Wording gap (build 0011): after each verdict the judge model rewrites the idea in plain wording and the jury prompt rescores the rewrite, blind. Measured, never used. */
+  wordingGap: boolean;
   /**
    * Self-improvement: ideas on this board are changes to this app. Prompts get
    * the app's current feature list, and gold ideas go to the Claude Code
@@ -220,6 +223,7 @@ export function defaultConfig(template = DEFAULT_TEMPLATES[0]): BoardConfig {
     autopilotSeconds: 10,
     rate: { stepsPerHour: 60, usdPerDay: 1 },
     autoProjectOnGold: true,
+    wordingGap: false,
     selfImprove: false,
     buildsPerDay: 4,
     buildModel: 'opus',
@@ -269,6 +273,7 @@ export function mergeConfig(base: BoardConfig, raw: any): BoardConfig {
       usdPerDay: Number.isFinite(usd) ? Math.min(1000, Math.max(0, Math.round(usd * 100) / 100)) : base.rate.usdPerDay,
     },
     autoProjectOnGold: b(r.autoProjectOnGold, base.autoProjectOnGold),
+    wordingGap: b(r.wordingGap, base.wordingGap),
     selfImprove: b(r.selfImprove, base.selfImprove),
     buildsPerDay: Number.isFinite(Number(r.buildsPerDay)) && r.buildsPerDay !== null && r.buildsPerDay !== ''
       ? Math.min(50, Math.max(0, Math.round(Number(r.buildsPerDay)))) : base.buildsPerDay,
@@ -318,8 +323,11 @@ export type Idea = {
   duel: Duel | null;
   /** Idea style (build 0010): the framing the breed was told to write in (STYLES in evolve.js). null: a seed, guest or older idea. */
   style: string | null;
+  /** Wording gap (build 0011): the judge model's plain rewrite of this idea and the jury prompt's blind scores for it. The gap is the jury's sum minus the plain sum (plainGap() in evolve.js). null: not rescored. */
+  plain: Plain | null;
   createdAt: string;
 };
+export type Plain = { title: string; pitch: string; originality: number; feasibility: number; impact: number; reason: string; model: string; at: string };
 export type DuelWinner = 'child' | 'parent' | 'tie';
 export type Duel = { originality: DuelWinner; feasibility: DuelWinner; impact: DuelWinner; reason: string; childFirst: boolean; model: string; at: string };
 export type Retrial = { originality: number; feasibility: number; impact: number; reason: string; model: string; at: string };
@@ -400,6 +408,7 @@ const ideaFromRow = (r: any): Idea => ({
   liftCheck: r.lift_check ?? null,
   duel: r.duel ? parseJson(r.duel) : null,
   style: r.style ?? null,
+  plain: r.plain ? parseJson(r.plain) : null,
   createdAt: r.created_at,
 });
 
@@ -448,7 +457,7 @@ export function openDb(file: string) {
   db.exec(SCHEMA);
   // Databases from before lift recipes: add the columns (SQLite has no ADD COLUMN IF NOT EXISTS).
   const ideaCols = new Set((db.prepare('PRAGMA table_info(ideas)').all() as any[]).map((c) => c.name));
-  for (const [name, type] of [['recipe_type', 'TEXT'], ['recipe', 'TEXT'], ['lift_type', 'TEXT'], ['lift_from', 'INTEGER'], ['lift_base', 'INTEGER'], ['retrial', 'TEXT'], ['lift_arm', 'TEXT'], ['escape_kw', 'TEXT'], ['lift_applied', 'INTEGER'], ['lift_check', 'TEXT'], ['duel', 'TEXT'], ['style', 'TEXT']]) {
+  for (const [name, type] of [['recipe_type', 'TEXT'], ['recipe', 'TEXT'], ['lift_type', 'TEXT'], ['lift_from', 'INTEGER'], ['lift_base', 'INTEGER'], ['retrial', 'TEXT'], ['lift_arm', 'TEXT'], ['escape_kw', 'TEXT'], ['lift_applied', 'INTEGER'], ['lift_check', 'TEXT'], ['duel', 'TEXT'], ['style', 'TEXT'], ['plain', 'TEXT']]) {
     if (!ideaCols.has(name)) db.exec(`ALTER TABLE ideas ADD COLUMN ${name} ${type}`);
   }
 
@@ -587,6 +596,11 @@ export function openDb(file: string) {
     /** The blind duel's per-criterion winners between this child and its parent. */
     saveDuel(id: number, d: Duel) {
       db.prepare('UPDATE ideas SET duel = ? WHERE id = ?').run(JSON.stringify(d), id);
+      return repo.getIdea(id);
+    },
+    /** Wording gap: the plain rewrite and its blind rescore. Kept on a re-judge: the text it rewrote has not changed. */
+    savePlain(id: number, p: Plain) {
+      db.prepare('UPDATE ideas SET plain = ? WHERE id = ?').run(JSON.stringify(p), id);
       return repo.getIdea(id);
     },
     saveRetrial(id: number, r: Retrial) {

@@ -194,6 +194,12 @@ Rules:
 - Judge the idea as written, not the best idea it could become.
 - If the board has a goal, judge against it: impact means impact on that goal, and an idea that does not serve the goal scores at most 2 on impact however good it is otherwise. Say in the reason how well it fits the goal.`;
 
+// Wording gap (build 0011): the plain rewrite keeps every concrete claim and strips the packaging.
+export const PLAIN_SYSTEM = `You rewrite ideas in plain, neutral wording, the way an editor strips a manuscript for blinded review.
+Keep every concrete claim exactly: what it is, who it is for, the mechanism, every number, file, step and limit.
+Remove everything else: catchy names, metaphors, analogies, scenes and characters, rhetorical framing, hype words and adjectives that carry no fact.
+Do not add, improve, fix or drop any substance. The title is a dry, literal name of 2–6 words.`;
+
 const list = (description: string) => ({ type: 'array', description, items: { type: 'string' } });
 const SUMMARY_SCHEMA = {
   type: 'object',
@@ -497,6 +503,32 @@ export function makeLLM(chat: ChatFn) {
       const pick = (v: unknown) => (v === 'A' || v === 'B' || v === 'tie' ? v : null);
       const out = Object.fromEntries(CRITERIA.map((c) => [c, pick(value?.[c])])) as Record<(typeof CRITERIA)[number], 'A' | 'B' | 'tie' | null>;
       return { ...out, reason: String(value?.reason ?? '').trim().slice(0, 300), costUsd };
+    },
+
+    /**
+     * Wording gap (build 0011): rewrite an idea in plain wording, like a
+     * manuscript stripped for blinded review. Same substance, no rhetoric.
+     * It sees only the idea's text: no scores, reason, medal or style. The
+     * engine then rescores the rewrite with the ordinary jury prompt.
+     * Returns null for the rewrite when the model gave no usable text.
+     */
+    async plainRewrite(a: { model: string; idea: Pitch; lang: Lang }) {
+      const user = [
+        `The idea:\n${fmtIdea(a.idea)}`,
+        `Rewrite it in plain wording. Write in the language of the idea; if unclear, in ${LANG_NAME[a.lang]}.`,
+      ].join('\n\n');
+      const { value, costUsd } = await chat({
+        model: a.model,
+        system: PLAIN_SYSTEM,
+        user,
+        schemaName: 'plain',
+        schema: PITCH_SCHEMA,
+        temperature: 0,
+        maxTokens: 300,
+      });
+      const title = String(value?.title ?? '').trim().slice(0, 120);
+      const pitch = String(value?.pitch ?? '').trim().slice(0, 600);
+      return { rewrite: title && pitch ? { title, pitch } : null, costUsd };
     },
   };
 }

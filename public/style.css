@@ -212,6 +212,17 @@ table.style-table .style-early td:nth-child(3) { color: var(--text-2); }
 .doubt-line { margin: 4px 0; }
 .doubt-verdict { font-weight: 600; margin: 4px 0; }
 .doubt .judging { margin: 6px 0 0; }
+/* Wording gap (build 0011) */
+.plain { margin: 0 0 12px; padding: 10px 12px; border-radius: var(--radius); border: 1px solid var(--line); font-size: 12px; }
+.plain.carried { border-color: rgba(229,138,122,.55); }
+.plain.holds { border-color: rgba(95,211,141,.45); }
+.plain p { margin: 4px 0 8px; }
+.plain-verdict { font-weight: 600; margin: 4px 0; }
+.plain-verdict.carried { color: #e58a7a; }
+.plain-verdict.holds { color: #5fd38d; }
+.plain-text { margin: 6px 0; color: var(--muted); }
+.plain-carried-cell { color: #e58a7a; }
+.wording-overview small { display: block; margin-top: 4px; }
 .judging { display: flex; gap: 10px; align-items: center; margin: 12px 0; color: var(--gold); }
 .spinner { width: 14px; height: 14px; border: 2px solid rgba(245,197,66,.3); border-top-color: var(--gold); border-radius: 50%; animation: spin .8s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }

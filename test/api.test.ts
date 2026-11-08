@@ -23,6 +23,9 @@ let duelAnswer: Record<string, string> | null = null; // the blind duel's A/B/ti
 let duelFails = false; // the duel's provider call throws
 let duelCoin = 0.9; // the engine's duel coin: below 0.5 shows the child as A
 let styleLot = 0; // idea styles: the engine's style lot (0: scenario, 0.99: metric)
+let plainScores: typeof judgeScores | null = null; // what the jury prompt gives the plain rewrite (wording gap), when a test sets it
+let plainAnswer: { title: string; pitch: string } | null = null; // the plain rewrite; null: the default one
+let plainFails = false; // the plain rewrite's provider call throws
 let failNext: Error | null = null;
 let xCitations: string[] = [];
 
@@ -36,9 +39,12 @@ async function fakeChat(r: ChatRequest) {
   }
   if (liftCheckFails && r.schemaName === 'liftcheck') throw new Error('provider down');
   if (duelFails && r.schemaName === 'duel') throw new Error('provider down');
+  if (plainFails && r.schemaName === 'plain') throw new Error('provider down');
   const n = calls.length;
   const value =
-    r.schemaName === 'expand' ? { ideas: [1, 2, 3].map((k) => ({ title: `"Barn ${n}.${k}."`, pitch: `Pitch ${k}` })) }
+    r.schemaName === 'plain' ? (plainAnswer ?? { title: 'Enkel omskrivning', pitch: 'Samma sak utan retorik.' })
+    : r.schemaName === 'judgement' && plainScores && r.user.includes('Enkel omskrivning') ? { reason: 'Rak men tunn.', ...plainScores, keywords: ['plain'], liftType: 'impact', lift: 'Ignorera.' }
+    : r.schemaName === 'expand' ? { ideas: [1, 2, 3].map((k) => ({ title: `"Barn ${n}.${k}."`, pitch: `Pitch ${k}` })) }
     : r.schemaName === 'judgement' && retrialScores && r.model === settings.models.retrial ? { reason: 'Andra domaren tvekar.', ...retrialScores, keywords: judgeKeywords }
     : r.schemaName === 'judgement' ? { reason: 'Stark mekanism, oklar kund.', ...judgeScores, keywords: judgeKeywords, ...judgeLift }
     : r.schemaName === 'liftcheck' ? (liftCheckAnswer ?? { reason: 'Oklart.' })
@@ -711,6 +717,102 @@ test('lift recipes: an old database gets the new columns', async () => {
   const st = r.insertIdea({ boardId: b.id, title: 'S', pitch: '', kind: 'expand', x: 0, y: 0, generation: 1, style: 'analogy' }, [i.id]);
   assert.equal(r.getIdea(st.id)!.style, 'analogy', 'the style column was added too');
   assert.equal(got.style, null);
+  assert.equal(got.plain, null);
+  r.savePlain(i.id, { title: 'P', pitch: 'p', originality: 2, feasibility: 2, impact: 3, reason: 'r', model: 'm', at: 'now' });
+  assert.equal(r.getIdea(i.id)!.plain!.impact, 3, 'the plain column was added too');
+});
+
+test('wording gap: a plain rewrite is rescored blind; the gap is measured and never touches the medal', async () => {
+  const { plainGap, styleCarried, wordingStats } = await import('../public/js/evolve.js');
+  const { fitness } = await import('../public/js/score.js');
+  const { PLAIN_SYSTEM } = await import('../server/llm.ts');
+  try {
+    judgeScores = { originality: 4, feasibility: 4, impact: 4 }; // 12: silver
+    judgeKeywords = ['jury', 'sound'];
+    plainScores = { originality: 3, feasibility: 3, impact: 3 }; // 9: gap +3
+    // Off by default: no rewrite, no extra calls.
+    const off = await newBoard();
+    assert.equal(off.config.wordingGap, false);
+    const n0 = calls.length;
+    const s0 = await seed(off.id, 'Ingen omskrivning');
+    await engine.idle();
+    assert.equal(calls.slice(n0).filter((c) => c.schemaName === 'plain').length, 0);
+    assert.equal(repo.getIdea(s0.id)!.plain, null);
+
+    // On: after the verdict, one rewrite and one blind rescore.
+    const board = (await api('PATCH', `/api/boards/${(await newBoard({ goal: 'Bättre jury' })).id}`, { config: { wordingGap: true } })).data.board;
+    assert.equal(board.config.wordingGap, true);
+    const n1 = calls.length;
+    const s = await seed(board.id, 'Glänsande formulering');
+    await engine.idle();
+    const mine = calls.slice(n1);
+    const rewrite = mine.find((c) => c.schemaName === 'plain')!;
+    assert.equal(rewrite.model, settings.models.judge);
+    assert.equal(rewrite.system, PLAIN_SYSTEM);
+    assert.match(rewrite.user, /Glänsande formulering/);
+    assert.doesNotMatch(rewrite.user, /Stark mekanism|\/15|bronze|silver|gold|12/i, 'the rewrite sees no verdict');
+    const judges = mine.filter((c) => c.schemaName === 'judgement');
+    assert.equal(judges.length, 2, 'the verdict and the blind rescore');
+    assert.match(judges[1].user, /Enkel omskrivning: Samma sak utan retorik\./);
+    assert.doesNotMatch(judges[1].user, /Glänsande|Stark mekanism/, 'the rescore sees only the rewrite, no first verdict');
+    assert.match(judges[1].user, /Bättre jury/, 'same jury prompt: the goal is there');
+    assert.equal(judges[1].system, judges[0].system, 'same jury system prompt');
+
+    const got = repo.getIdea(s.id)!;
+    assert.deepEqual([got.originality, got.feasibility, got.impact], [4, 4, 4], 'the medal stays the jury\'s');
+    assert.deepEqual(got.keywords, ['jury', 'sound'], 'the rescore\'s keywords never touch the idea');
+    assert.equal(got.recipeType, null, 'nor its recipe');
+    assert.deepEqual([got.plain!.title, got.plain!.originality, got.plain!.model], ['Enkel omskrivning', 3, settings.models.judge]);
+    assert.equal(plainGap(got), 3);
+    assert.equal(styleCarried(got), true);
+    assert.equal(fitness(got), 12, 'selection still reads the jury\'s score');
+    const payload = (await api('GET', `/api/boards/${board.id}`)).data;
+    assert.equal(payload.ideas.find((i: any) => i.id === s.id).plain.impact, 3, 'the board payload carries the rescore');
+
+    // Re-judging keeps the rewrite (the text did not change) and does not rewrite again.
+    const n2 = calls.length;
+    await api('POST', `/api/ideas/${s.id}/judge`, {});
+    await engine.idle();
+    assert.equal(calls.slice(n2).filter((c) => c.schemaName === 'plain').length, 0);
+    assert.equal(repo.getIdea(s.id)!.plain!.originality, 3);
+
+    // A gap of exactly one point is within the judge's own spread: the substance holds.
+    plainScores = { originality: 4, feasibility: 4, impact: 3 }; // 11
+    const s2 = await seed(board.id, 'Rak formulering');
+    await engine.idle();
+    assert.equal(plainGap(repo.getIdea(s2.id)), 1);
+    assert.equal(styleCarried(repo.getIdea(s2.id)), false);
+
+    // A failing rewrite leaves no rescore and never fails the verdict.
+    plainFails = true;
+    const s3 = await seed(board.id, 'Trasig omskrivning');
+    await engine.idle();
+    const k3 = repo.getIdea(s3.id)!;
+    assert.equal(k3.plain, null);
+    assert.equal(k3.originality, 4);
+    plainFails = false;
+
+    // By hand, on any board, for a judged idea: redone on request.
+    plainScores = { originality: 4, feasibility: 4, impact: 4 };
+    const hand = await api('POST', `/api/ideas/${s0.id}/plain`, {});
+    assert.equal(hand.status, 200);
+    assert.equal(plainGap(hand.data.idea), 0);
+    assert.equal((await api('POST', `/api/ideas/999999/plain`, {})).status, 404);
+    plainAnswer = { title: '', pitch: '' };
+    assert.equal((await api('POST', `/api/ideas/${s0.id}/plain`, {})).status, 502, 'an empty rewrite is an error by hand');
+    plainAnswer = null;
+
+    // Per first keyword: two rescored ideas under "jury" on this board, one style-carried.
+    const st = wordingStats(repo.listIdeas(board.id));
+    assert.deepEqual([st.n, st.carried], [2, 1]);
+    assert.deepEqual(st.keywords.map((k) => [k.keyword, k.n, k.carried, k.meanGap]), [['jury', 2, 1, 2]]);
+  } finally {
+    judgeScores = { originality: 3, feasibility: 3, impact: 3 };
+    judgeKeywords = ['Public Space', 'sound'];
+    plainScores = null;
+    plainAnswer = null;
+    plainFails = false;
+  }
 });
 
 test('idea styles: each breed draws a style by lot, the prompt demands it, and the child stores it', async () => {

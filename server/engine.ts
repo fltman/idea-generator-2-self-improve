@@ -193,6 +193,8 @@ export function createEngine(deps: Deps) {
       out.idea = (await checkLift(board, out.idea)) ?? out.idea;
       // ...and did it beat its parent, read blind side by side? The duel decides the recipe's hit.
       out.idea = (await duelLift(board, out.idea)) ?? out.idea;
+      // Would the jury score it the same in plain words? Measured only; never touches the medal.
+      if (board.config.wordingGap && !out.idea.plain) out.idea = (await plainRescore(board, out.idea).catch(() => null)) ?? out.idea;
       // A verdict one point from another medal gets a blind second opinion, in the background.
       if (autoRetrial(board, out.idea)) queueRetrial(out.idea.id);
       return out;
@@ -259,6 +261,46 @@ export function createEngine(deps: Deps) {
     } catch {
       return null;
     }
+  }
+
+  // ---------------------------------------------------------------- wording gap
+
+  /**
+   * Wording gap (build 0011), like blinded peer review: the judge model
+   * rewrites the idea in plain wording (seeing only its text), then the
+   * ordinary jury prompt scores the rewrite, blind (no first verdict). The
+   * gap between the jury's sum and the plain sum is computed where it is
+   * shown (plainGap() in evolve.js); above PLAIN_GAP the idea is
+   * "style-carried". Nothing in selection, the medal or the builder reads
+   * it. Returns null when the rewrite came back empty; throws on a failed
+   * call (judge() swallows that, the hand endpoint reports it).
+   */
+  async function plainRescore(board: Board, idea: Idea): Promise<Idea | null> {
+    const model = modelFor(board, 'judge');
+    const { rewrite } = await call(board.id, () => llm.plainRewrite({ model, idea, lang: board.config.lang }));
+    if (!rewrite) return null;
+    const { judgement: j } = await call(board.id, () =>
+      llm.judge({
+        model, board: ctxOf(board), idea: rewrite, lang: board.config.lang,
+        guidance: guidanceFor(board), vocabulary: repo.keywordVocabulary(),
+      }),
+    );
+    // Only the scores and the reason are kept: the rewrite's keywords and recipe must not touch the idea.
+    const saved = repo.savePlain(idea.id, {
+      ...rewrite, originality: j.originality, feasibility: j.feasibility, impact: j.impact, reason: j.reason, model, at: new Date().toISOString(),
+    })!;
+    emitIdeas(board.id, [saved]);
+    return saved;
+  }
+
+  /** POST /api/ideas/:id/plain: the wording-gap rescore by hand, on any board. Redoes an old one. */
+  async function plain(ideaId: number) {
+    const idea = mustIdea(ideaId);
+    if (!isJudged(idea)) throw new AppError(400, 'not_judged', 'The jury has not judged this idea yet');
+    const board = mustBoard(idea.boardId);
+    const saved = await plainRescore(board, idea);
+    if (!saved) throw new AppError(502, 'llm_failed', 'The plain rewrite came back empty');
+    return { idea: saved };
   }
 
   // ---------------------------------------------------------------- second opinion
@@ -467,6 +509,8 @@ export function createEngine(deps: Deps) {
     retrying,
     /** A second opinion by hand (any judged idea, any board): awaited, unlike the automatic one. */
     retrial,
+    /** The wording-gap rescore by hand (any judged idea, any board). */
+    plain,
     createProject: (ideaId: number) => createProject(mustIdea(ideaId)),
 
     reveal(ideaId: number) {

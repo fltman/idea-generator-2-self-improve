@@ -280,6 +280,7 @@ export function createHandler({ repo, engine, autopilot, runtime, publicDir, bui
     ['POST', /^\/api\/boards\/(\d+)\/combine$/, ([id], b) => engine.combine(+id, b.a, b.b)],
     ['POST', /^\/api\/ideas\/(\d+)\/judge$/, ([id]) => engine.judge(+id)],
     ['POST', /^\/api\/ideas\/(\d+)\/retrial$/, ([id]) => engine.retrial(+id)],
+    ['POST', /^\/api\/ideas\/(\d+)\/plain$/, ([id]) => engine.plain(+id)],
     ['PATCH', /^\/api\/ideas\/(\d+)$/, ([id], b) => {
       if (!('medalOverride' in b)) throw new AppError(400, 'bad_request', 'Nothing to change');
       return engine.setMedal(+id, b.medalOverride);
