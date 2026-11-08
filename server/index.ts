@@ -78,7 +78,12 @@ createServer(createHandler({ repo, engine, autopilot, runtime, publicDir: join(r
   if (builder && process.env.CAMERA !== '0') {
     camera = createCamera({
       root, port: PORT, minutes: Number(process.env.CAMERA_MINUTES ?? 10),
-      boardId: () => repo.listBoards().find((b) => b.config.selfImprove)?.id ?? null, log: console.log,
+      // the self-improvement board whose autopilot runs (a retired one keeps its ideas but goes manual), else the newest
+      boardId: () => {
+        const self = repo.listBoards().filter((b) => b.config.selfImprove);
+        return (self.find((b) => b.config.mode === 'auto') ?? self.sort((a, b) => b.id - a.id)[0])?.id ?? null;
+      },
+      log: console.log,
     }).start();
   }
   const auto = repo.listBoards().filter((b) => b.config.mode === 'auto');
