@@ -7,6 +7,9 @@
 //   --seed "…"           a seed idea, repeatable; replaces the default seeds
 //   --usd N              the board's dollar limit per day (default 5)
 //   --retire             switch the autopilot off on the other self-improvement boards
+//   --focus users        aim the goal, jury and research at what users notice instead of
+//                        the evolution and the jury (default: evolution)
+//   --spores             turn spores on: the autopilot trades its best ideas with other spore boards
 // A fresh board is how you restart the loop after many builds: the old board's
 // pool was bred before those builds existed and keeps proposing them again.
 //
@@ -34,21 +37,44 @@ async function api(method: string, path: string, body?: unknown) {
   return data;
 }
 
-const GOAL =
-  'Make Idea Generator 2 a better idea generator: more original and useful ideas, a sharper and more honest jury, smarter evolution, and clearer insight for the people watching. Every idea is a concrete change to this app that Claude Code can build, test and document in one unattended session.';
-
-const JURY = `Each idea is a proposed change to this app (Idea Generator 2). If it gets gold, a coding agent (Claude Code) builds it into the app's own code, unattended, in one session, and it is merged if the tests pass.
-FEASIBILITY here means: can a coding agent build and test it in this codebase in about an hour, with no new npm dependencies, no new paid services or accounts, and without weakening security (loopback only, text nodes in the DOM, never trusting model-written URLs)? 5 = a contained change to a few files with an obvious way to test and show it. 3 = touches several modules but is clear. 1–2 = vague, needs new infrastructure, accounts, hardware, or a human to finish it.
-IMPACT here means impact on the app as an idea generator: better ideas, sharper or more honest judging, smarter evolution, or clearer insight for the people using or watching it. Cosmetic tweaks score at most 2.
-ORIGINALITY is judged against what the app already does (listed below). A feature the app already has scores 1.
-An idea that does not say what the user would see, or how to verify it, scores at most 3 on feasibility.`;
-
 const DEFAULT_SEEDS = [
   'The autopilot learns which kinds of crosses produce gold on a board and breeds more of those.',
   'The jury says what would lift each idea one medal; the next generation tries exactly that.',
   'Show viewers why one idea beat another: the jury’s reasons side by side.',
 ];
-const SEEDS = all('--seed').length ? all('--seed') : DEFAULT_SEEDS;
+const FOCUS = {
+  evolution: {
+    goal: 'Make Idea Generator 2 a better idea generator: more original and useful ideas, a sharper and more honest jury, smarter evolution, and clearer insight for the people watching. Every idea is a concrete change to this app that Claude Code can build, test and document in one unattended session.',
+    impact: 'IMPACT here means impact on the app as an idea generator: better ideas, sharper or more honest judging, smarter evolution, or clearer insight for the people using or watching it. Cosmetic tweaks score at most 2.',
+    research: 'LLM idea generation, creativity evaluation, LLM-as-a-judge, evolutionary search with language models',
+    seeds: DEFAULT_SEEDS,
+    wordingGap: true, // build 0011: every verdict also gets a blind rescore of a plain rewrite
+  },
+  users: {
+    goal: 'Make Idea Generator 2 better to use: what a person notices when they start a board, read and steer it, share what came out, or point it at their own code. Useful ideas sooner, screens that explain themselves, less waiting and fewer surprises. Every idea is a concrete change to this app that Claude Code can build, test and document in one unattended session.',
+    impact: 'IMPACT here means impact on the people using the app: reaching useful ideas sooner, understanding a board at a glance, steering it with less effort, sharing or exporting results, or making codebase boards and spores worth using. A new measurement of the jury or the evolution that a user would not act on scores at most 2. Cosmetic tweaks score at most 2.',
+    research: 'creativity support tools, brainstorming software usability, human-AI co-creation interfaces',
+    seeds: [
+      'When the autopilot pauses (hourly cap, daily budget, missing key), the top of the board says why in plain words and when it resumes.',
+      'Type a word and only the matching ideas stay lit on the canvas; filter by medal or by age with one click.',
+      'A new board asks three short questions about what you want and writes its goal and first seeds from the answers.',
+      'Gold ideas on a codebase board get a button that hands them to Claude Code in that folder and shows the result next to the idea.',
+    ],
+    wordingGap: false,
+  },
+} as const;
+const focusName = (arg('--focus') ?? 'evolution') as keyof typeof FOCUS;
+const F = FOCUS[focusName];
+if (!F) throw new Error(`--focus must be one of: ${Object.keys(FOCUS).join(', ')}`);
+const GOAL = F.goal;
+
+const JURY = `Each idea is a proposed change to this app (Idea Generator 2). If it gets gold, a coding agent (Claude Code) builds it into the app's own code, unattended, in one session, and it is merged if the tests pass.
+FEASIBILITY here means: can a coding agent build and test it in this codebase in about an hour, with no new npm dependencies, no new paid services or accounts, and without weakening security (loopback only, text nodes in the DOM, never trusting model-written URLs)? 5 = a contained change to a few files with an obvious way to test and show it. 3 = touches several modules but is clear. 1–2 = vague, needs new infrastructure, accounts, hardware, or a human to finish it.
+${F.impact}
+ORIGINALITY is judged against what the app already does (listed below). A feature the app already has scores 1.
+An idea that does not say what the user would see, or how to verify it, scores at most 3 on feasibility.`;
+
+const SEEDS = all('--seed').length ? all('--seed') : null; // null: the focus's seeds
 const USD = Number(arg('--usd') ?? 5);
 
 const CC = 'claudecode:sonnet';
@@ -68,13 +94,14 @@ await api('PATCH', `/api/boards/${board.id}`, {
     lang: 'en',
     selfImprove: true,
     autoProjectOnGold: false,
-    wordingGap: true, // build 0011: every verdict also gets a blind rescore of a plain rewrite
+    wordingGap: F.wordingGap,
+    spores: has('--spores'),
     buildsPerDay: 4,
     buildModel: 'opus',
     judgeGuidance: JURY,
     researchers: {
       x: { enabled: false, focus: '' },
-      research: { enabled: true, focus: 'LLM idea generation, creativity evaluation, LLM-as-a-judge, evolutionary search with language models' },
+      research: { enabled: true, focus: F.research },
     },
     mode: has('--manual') ? 'manual' : 'auto',
     autopilotSeconds: 45,
@@ -83,8 +110,9 @@ await api('PATCH', `/api/boards/${board.id}`, {
   },
 });
 if (!has('--no-seeds')) {
-  await Promise.all(SEEDS.map((text, i) => {
-    const a = (i / SEEDS.length) * Math.PI * 2;
+  const seeds = SEEDS ?? F.seeds;
+  await Promise.all(seeds.map((text, i) => {
+    const a = (i / seeds.length) * Math.PI * 2;
     return api('POST', `/api/boards/${board.id}/seed`, { text, x: Math.cos(a) * 260, y: Math.sin(a) * 260 });
   }));
 }
