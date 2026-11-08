@@ -100,3 +100,28 @@ test('spores off: the autopilot never sends anything', async () => {
   for (let i = 0; i < 12; i++) await engine.autoStep(home.id);
   assert.equal(repo.sporesFrom(home.id).length, 0);
 });
+
+test('autopilot: an idea that is built or being built never leaves as a spore', async () => {
+  const repo = openDb(':memory:');
+  const chat = async (r: ChatRequest) => ({
+    value: r.schemaName === 'expand' ? { ideas: [1, 2, 3].map((k) => ({ title: `I ${Math.random()} ${k}`, pitch: 'p' })) }
+      : r.schemaName === 'judgement' ? { reason: 'r', originality: 2, feasibility: 3, impact: 3, keywords: ['k'] }
+      : { title: `K ${Math.random()}`, pitch: 'p' },
+    costUsd: 0,
+  });
+  const engine = createEngine({ repo, chat, settings: () => DEFAULT_APP_SETTINGS, gitInit: false, sporeRng: () => 0.5 });
+  const home = repo.createBoard({ title: 'Hem', config: { spores: true } });
+  const other = repo.createBoard({ title: 'Annan', config: { spores: true } });
+  const best = repo.insertIdea({ boardId: home.id, title: 'Byggd', pitch: '', kind: 'seed', x: 0, y: 0, generation: 0 });
+  const next = repo.insertIdea({ boardId: home.id, title: 'Obyggd', pitch: '', kind: 'seed', x: 0, y: 0, generation: 0 });
+  repo.saveJudgement(best.id, { reason: 'r', originality: 5, feasibility: 5, impact: 4, keywords: ['k'] } as any);
+  repo.saveJudgement(next.id, { reason: 'r', originality: 4, feasibility: 4, impact: 4, keywords: ['k'] } as any);
+  const b = repo.createBuild({ ideaId: best.id, boardId: home.id, title: 'Byggd', pitch: '', trigger: 'jury' });
+  repo.updateBuild(b.id, { status: 'merged' });
+  for (let i = 0; i < 12 && !repo.sporesFrom(home.id).length; i++) await engine.autoStep(home.id);
+  await engine.idle();
+  const sent = repo.sporesFrom(home.id);
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0].originIdeaId, next.id, 'the built idea stays home; the next best goes');
+  assert.equal(sent[0].boardId, other.id);
+});

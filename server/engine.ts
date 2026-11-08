@@ -163,7 +163,12 @@ export function createEngine(deps: Deps) {
     const out = repo.sporesFrom(boardId);
     const ideas = repo.listIdeas(boardId);
     if (!sporeDue(ideas, out.reduce((m, g) => Math.max(m, g.id), 0))) return null;
-    const spore = pickSpore(ideas, new Set(out.map((g) => g.originIdeaId)));
+    // Never send an idea twice, nor one that is built or being built: it would only
+    // propose the same change again on the board it lands on.
+    const BUILT = new Set(['queued', 'running', 'ready', 'merged']);
+    const keep = new Set(out.map((g) => g.originIdeaId));
+    for (const i of ideas) if (BUILT.has(repo.latestBuildFor(i.id)?.status ?? '')) keep.add(i.id);
+    const spore = pickSpore(ideas, keep);
     if (!spore) return null;
     const candidates = repo.listBoards()
       .filter((b) => b.id !== boardId && b.config.spores && !repo.hasGuest(b.id, spore.id))
