@@ -1,0 +1,25 @@
+{
+  "seq": 5,
+  "title": "Diversity pressure: the autopilot notices a monoculture and breeds outside it",
+  "pitch": "On this very board almost every idea for hours has been a variant of lift recipes: tournament selection keeps crossing the strongest ideas, and they all share one lineage and the same keywords. Measure how concentrated the board is (share of recent ideas in the dominant keyword cluster or lineage); when one theme dominates, the autopilot picks at least one parent from outside it, or expands a neglected idea. The overview shows a diversity gauge over time and says when the pressure kicked in, so watchers can see the app noticing its own monoculture.",
+  "status": "merged",
+  "trigger": "hand",
+  "branch": "build/0005-diversity-pressure-the-autopilot-notices",
+  "commit": null,
+  "summary": "The autopilot now measures how concentrated the board is: the share of the last 24 bred ideas that carry the jury's most common keyword. From 60% on it calls this a monoculture, takes at least one parent from outside the theme (or expands the best idea outside it), and marks the child with the theme it escaped; the jury's score still ranks the candidates within that pool. The overview has a new Diversity gauge: one bar per bred idea against a 60% line, the dominant theme named, since which idea the current monoculture has run, and how many breeds outside it really left the theme. An escaped idea's panel says so. I added 5 tests and one assertion (85 → 90), and `npm test` passes. On a copy of the live board the gauge shows \"lift recipe\" in 23 of the last 24 ideas, a monoculture since idea #63; no real escape exists yet, so the panel screenshot is staged and labelled as such in the journal.",
+  "error": null,
+  "costUsd": 2.5,
+  "sessionId": "28db750a-c0a9-4d91-8b0d-4b6b3026f09b",
+  "createdAt": "2026-11-08 09:09:55",
+  "startedAt": "2026-11-08 09:09:55",
+  "finishedAt": "2026-11-08 09:17:06",
+  "jury": {
+    "originality": 3,
+    "feasibility": 3,
+    "impact": 3,
+    "reason": "Addresses a real evolution weakness (tournament selection converging on one keyword family) with a contained change, but the idea is thinly specified: no measure, threshold or visible output is stated."
+  },
+  "lineage": [],
+  "filmLine": "When the app first measured itself, the gauge came up almost solid orange: it had been breeding the same idea for nearly its whole life, and only noticed once it could count.",
+  "tests": "✔ diversity: the share of recent bred ideas carrying the top keyword; seeds and guests do not count (0.291625ms)\n✔ diversity pressure: in a monoculture every breed takes a parent from outside the theme, still by score (3.348625ms)\n✔ diversity pressure: no monoculture, or nothing outside it, breeds as before (0.402125ms)\n✔ diversity gauge: the series over time, when the monoculture began, and what the pressure did (0.373041ms)\nℹ tests 90\nℹ suites 0\nℹ pass 90\nℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 3933.094375"
+}
