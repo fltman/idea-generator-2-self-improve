@@ -112,6 +112,20 @@ const LIFT_CHECK_SCHEMA = {
   additionalProperties: false,
 };
 
+// The blind duel (build 0009): two ideas, labelled only A and B, one winner per criterion.
+const DUEL_PICK = (what: string) => ({ type: 'string', enum: ['A', 'B', 'tie'], description: `Which idea is clearly stronger on ${what}: "A", "B", or "tie" if neither clearly is.` });
+const DUEL_SCHEMA = {
+  type: 'object',
+  properties: {
+    reason: { type: 'string', description: 'One sentence, at most 30 words: the decisive difference between A and B.' },
+    originality: DUEL_PICK('originality (how new and surprising the idea is)'),
+    feasibility: DUEL_PICK('feasibility (how realistic it is to carry out with reasonable means)'),
+    impact: DUEL_PICK('impact (how much difference it makes if it works)'),
+  },
+  required: ['reason', 'originality', 'feasibility', 'impact'],
+  additionalProperties: false,
+};
+
 // ---------------------------------------------------------------- prompts
 
 const LANG_NAME: Record<Lang, string> = { sv: 'Swedish', en: 'English' };
@@ -440,6 +454,33 @@ export function makeLLM(chat: ChatFn) {
       });
       const applied = typeof value?.applied === 'boolean' ? value.applied : null;
       return { applied, reason: String(value?.reason ?? '').trim().slice(0, 300), costUsd };
+    },
+
+    /**
+     * The blind duel (build 0009): two ideas as "A" and "B", nothing else. No
+     * recipe, no scores, no medals, no lineage, so the model cannot know which
+     * is the parent. The caller decides the order (at random) and maps A/B
+     * back. A criterion with no valid answer comes back null.
+     */
+    async duel(a: { model: string; a: Pitch; b: Pitch; lang: Lang }) {
+      const user = [
+        `Idea A:\n${fmtIdea(a.a)}`,
+        `Idea B:\n${fmtIdea(a.b)}`,
+        `Compare A and B on each criterion. Write the reason in the language of the ideas; if unclear, in ${LANG_NAME[a.lang]}.`,
+      ].join('\n\n');
+      const { value, costUsd } = await chat({
+        model: a.model,
+        system:
+          'You compare two ideas side by side and pick the stronger one on each criterion separately. Judge only the text in front of you. The order of A and B means nothing. Say "tie" when the difference on a criterion is not clear.',
+        user,
+        schemaName: 'duel',
+        schema: DUEL_SCHEMA,
+        temperature: 0,
+        maxTokens: 300,
+      });
+      const pick = (v: unknown) => (v === 'A' || v === 'B' || v === 'tie' ? v : null);
+      const out = Object.fromEntries(CRITERIA.map((c) => [c, pick(value?.[c])])) as Record<(typeof CRITERIA)[number], 'A' | 'B' | 'tie' | null>;
+      return { ...out, reason: String(value?.reason ?? '').trim().slice(0, 300), costUsd };
     },
   };
 }

@@ -7,6 +7,7 @@ import {
   diversity, diversitySeries, pressureStats, MONOCULTURE_SHARE, DIVERSITY_MIN,
   CONTROL_EVERY, controlDue, medalGain, netLiftStats, netNudge,
   appliedStatus, appliedStats, APPLIED_STATUSES,
+  duelHit, duelStats, DUEL_SIDES,
 } from '../public/js/evolve.js';
 
 const idea = (id: number, sum: number | null, extra: any = {}) => {
@@ -209,6 +210,30 @@ test('recipe check: an ignored recipe is neither hit nor miss; the split counts 
   assert.deepEqual(APPLIED_STATUSES, ['applied', 'ignored', 'unchecked']);
   // The placebo comparison is intention-to-treat: every recipe child stays in the recipe arm.
   assert.deepEqual(trialStats(ideas).recipe.total, { tries: 4, hits: 3 });
+});
+
+test('blind duel: the child winning the recipe criterion is the hit; a tie or a parent win is a miss; no duel keeps the medal rule', () => {
+  const d = (o: string, f: string, i: string) => ({ originality: o, feasibility: f, impact: i, reason: 'r', childFirst: true });
+  const ideas = [
+    idea(1, 10, { liftType: 'impact', liftBase: 1, liftArm: 'recipe', duel: d('parent', 'tie', 'child') }), // no medal rise, duel win: hit
+    idea(2, 11, { liftType: 'impact', liftBase: 1, liftArm: 'recipe', duel: d('child', 'child', 'tie') }), // medal rose, impact tie: miss
+    idea(3, 11, { liftType: 'feasibility', liftBase: 1, liftArm: 'recipe', duel: d('tie', 'parent', 'child') }), // lost its own criterion: miss
+    idea(4, 11, { liftType: 'impact', liftBase: 1, liftArm: 'recipe' }), // no duel: medal rule, hit
+    idea(5, 10, { liftType: 'impact', liftBase: 1, liftArm: 'recipe', liftApplied: false, duel: d('child', 'child', 'child') }), // ignored: out
+    idea(6, null, { liftType: 'impact', liftBase: 1, liftArm: 'recipe', duel: d('child', 'child', 'child') }), // not judged
+    idea(7, 11, { liftType: 'impact', liftBase: 1, liftArm: 'placebo', duel: d('child', 'child', 'child') }), // not a recipe child
+  ];
+  assert.deepEqual(ideas.map(duelHit), [true, false, false, null, true, true, null]);
+  assert.deepEqual(ideas.map(liftHit), [true, false, false, true, null, null, null]);
+  assert.deepEqual(liftStats(ideas).impact, { tries: 3, hits: 2 });
+  assert.deepEqual(liftStats(ideas).feasibility, { tries: 1, hits: 0 });
+  const s = duelStats(ideas);
+  assert.deepEqual([s.n, s.duelHits, s.medalHits], [4, 2, 2], 'judged recipe children with a duel (the ignored one included)');
+  assert.deepEqual(s.byCriterion.impact, { child: 3, parent: 0, tie: 1 });
+  assert.deepEqual(DUEL_SIDES, ['child', 'parent', 'tie']);
+  // The medal and the placebo table do not move.
+  assert.equal(medal(ideas[0]), 1);
+  assert.deepEqual(trialStats(ideas).recipe.total, { tries: 5, hits: 3 }, 'intention to treat, medal rule');
 });
 
 test('placebo trials: hits per arm and type, only the recipe arm feeds liftStats, and the verdict waits for data', () => {

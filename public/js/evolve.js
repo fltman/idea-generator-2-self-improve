@@ -72,12 +72,54 @@ export function liftRate(stats, type) {
  * and no-task children too), not judged yet, or the recipe check ruled that
  * the child ignored its recipe (then the recipe was never tried, so it is
  * neither a hit nor a miss). Unchecked children (older ideas, a failed check)
- * still count, as they did before the check existed.
+ * still count, as they did before the check existed. With a blind duel
+ * (build 0009) the duel decides: a hit is the child beating its parent on the
+ * recipe's criterion. Without one, a hit is the medal rising above liftBase.
  */
 export function liftHit(idea) {
   if (armOf(idea) !== 'recipe' || !LIFT_TYPES.includes(idea?.liftType)) return null;
   if (idea.liftApplied === false) return null;
-  return armHit(idea);
+  if (armHit(idea) == null) return null; // not judged yet
+  const d = duelHit(idea);
+  return d ?? armHit(idea);
+}
+
+// ---------------------------------------------------------------- blind duel
+//
+// A medal is a coarse ruler: a recipe can sharpen a child without crossing a
+// threshold, and a child can cross one by noise. After the verdict, the judge
+// model reads child and parent side by side as "A" and "B" in random order
+// (no recipe, scores or lineage) and names a winner per criterion
+// (idea.duel: 'child' | 'parent' | 'tie' each). For a recipe child with a
+// duel, the hit is the child winning the recipe's own criterion; a tie is a
+// miss. Children without a duel keep the medal rule.
+
+export const DUEL_SIDES = ['child', 'parent', 'tie'];
+
+/** Did the child win its recipe's criterion in the blind duel? null: no duel, or not a recipe child. */
+export function duelHit(idea) {
+  if (armOf(idea) !== 'recipe' || !LIFT_TYPES.includes(idea?.liftType)) return null;
+  const w = idea.duel?.[idea.liftType];
+  return DUEL_SIDES.includes(w) ? w === 'child' : null;
+}
+
+/**
+ * Judged recipe children that have a duel: how many won the recipe's
+ * criterion in the duel, how many rose a medal, and per criterion how often
+ * the child, the parent or neither won.
+ */
+export function duelStats(ideas) {
+  const out = { n: 0, duelHits: 0, medalHits: 0, byCriterion: Object.fromEntries(LIFT_TYPES.map((c) => [c, { child: 0, parent: 0, tie: 0 }])) };
+  for (const i of ideas) {
+    const d = duelHit(i);
+    const m = armHit(i);
+    if (d == null || m == null) continue;
+    out.n++;
+    if (d) out.duelHits++;
+    if (m) out.medalHits++;
+    for (const c of LIFT_TYPES) if (DUEL_SIDES.includes(i.duel[c])) out.byCriterion[c][i.duel[c]]++;
+  }
+  return out;
 }
 
 // ---------------------------------------------------------------- recipe check

@@ -169,6 +169,16 @@ table.trial .trial-total th, table.trial .trial-total td { border-top: 1px solid
 .applied-cells { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 4px; font-variant-numeric: tabular-nums; }
 .applied-cell.applied b { color: #5fd38d; }
 .applied-cell.ignored b { color: #e58a7a; }
+.duel { margin-top: 6px; font-size: 12px; }
+.duel-head { color: var(--text-2); }
+.duel-badges { display: flex; flex-wrap: wrap; gap: 6px; margin: 4px 0; font-variant-numeric: tabular-nums; }
+.duel-badge { padding: 1px 7px; border-radius: 999px; border: 1px solid rgba(255,255,255,.14); white-space: nowrap; }
+.duel-badge.child { color: #5fd38d; border-color: rgba(95,211,141,.45); }
+.duel-badge.parent { color: #e58a7a; border-color: rgba(229,138,122,.45); }
+.duel-badge.tie { color: var(--text-2); }
+.duel-badge.recipe { border-width: 2px; font-weight: 600; }
+.duel-tally { white-space: nowrap; }
+.duel-split { margin-top: 8px; font-size: 12px; }
 .lift-net { font-size: 12px; margin-top: 2px; }
 .lift-net.net-up { color: #5fd38d; }
 .lift-net.net-down { color: #e58a7a; }

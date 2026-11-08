@@ -1,0 +1,86 @@
+{
+  "seq": 9,
+  "title": "Blind Duel Verdict Judges Recipe Hits",
+  "pitch": "For board watchers and the autopilot: after a bred child is judged, one extra blind call compares parent and child texts in random order, picking a winner per criterion. Absolute scores and medals stay unchanged. The duel decides recipe hit/miss, shown as per-criterion winner badges beside sibling recipes.",
+  "status": "merged",
+  "trigger": "hand",
+  "branch": "build/0009-blind-duel-verdict-judges-recipe-hits",
+  "commit": null,
+  "summary": "After the jury judges a recipe child, one extra call to the judge model compares child and parent as \"Idea A\"/\"Idea B\", in coin-flipped order with no recipe, scores or lineage. It picks a winner or a tie per criterion and is stored in a new `duel` column. The recipe hit is now the child winning the recipe's criterion; medals and scores stay unchanged. Children with no duel (the 97 existing ones, or a failed duel) keep the medal rule, and the placebo table and net lift stay on medals so the comparisons between groups stay fair. In the app: ▲/▼/= badges per criterion (the recipe's criterion ringed) and a hit/miss line in the child's panel, plus an overview row comparing duel wins with medal rises for the same children. The live database has no duels yet, so the screenshots use illustrative duels, labelled as such. 99 tests pass.",
+  "error": null,
+  "costUsd": 2.35,
+  "sessionId": "aa6df493-f2f1-4c2d-b562-7dd0fc141553",
+  "createdAt": "2026-11-08 12:14:03",
+  "startedAt": "2026-11-08 12:14:03",
+  "finishedAt": "2026-11-08 12:21:17",
+  "jury": {
+    "originality": 4,
+    "feasibility": 4,
+    "impact": 3,
+    "reason": "Pairwise blind duel replaces noisy medal-threshold hit counting, making recipe measurement more honest; but it adds a call per child and overlaps with the existing second judge."
+  },
+  "lineage": [
+    {
+      "kind": "combine",
+      "title": "Recipe Hit-Rate Duel Panel",
+      "pitch": "For board watchers and the autopilot: the jury writes a typed lift recipe per idea; the child gets it as its task and the medal change is logged. The panel shows sibling recipes side by side per criterion with hit rates, and those rates weight parent and cross picks."
+    },
+    {
+      "kind": "expand",
+      "title": "Parent-Child Blind Duel Judging",
+      "pitch": "Bolder: the judge sees parent and child text in random order, with no recipe, scores and lineage hidden. It picks the better idea per criterion. Medals and hit rates use this duel verdict, and the panel shows who won each criterion."
+    },
+    {
+      "kind": "combine",
+      "title": "Lift Recipes Fed Back by Hit Rate",
+      "pitch": "The jury writes a typed one-medal lift recipe per idea. The autopilot hands it to the offspring as its task, then logs whether the medal rose. Parent and cross-type picks are weighted by each recipe type's hit rate, shown in the panel."
+    },
+    {
+      "kind": "combine",
+      "title": "Lift Recipe Duel Ledger",
+      "pitch": "Jury writes a typed lift recipe (criterion + type) per idea; autopilot hands it to the child as its task and logs whether the medal rose. The panel shows the recipe beside the sibling's, per criterion, with hit rate per recipe and cross type. That hit rate weights parent and cross selection."
+    },
+    {
+      "kind": "expand",
+      "title": "Recipe-Blind Jury Rematch",
+      "pitch": "Bolder jury change: after a child follows a recipe, a second jury run sees only child and parent text, not the recipe or the first score. Only lifts both juries agree on count toward hit rates, and disagreements show as flagged duels."
+    },
+    {
+      "kind": "seed",
+      "title": "Jury says what would lift each idea one medal",
+      "pitch": "When the jury scores an idea, it should also say what would lift it one medal, and the next generation should try exactly that."
+    },
+    {
+      "kind": "combine",
+      "title": "Lyftrecept med mätt träffsäkerhet",
+      "pitch": "Juryn skriver ett typmärkt lyftrecept per idé. Autopiloten ger det som uppgift åt avkomman, loggar om medaljen lyfte per recepttyp och korstyp, och viktar både föräldraval och korstyp efter träffsäkerheten, som visas i idépanelen."
+    },
+    {
+      "kind": "combine",
+      "title": "Lyftrecept som mäts och styr urvalet",
+      "pitch": "Juryn ger varje idé ett typmärkt lyftrecept (kriterium + typ, t.ex. \"skärp genomförbarhet\"). Nästa generation får receptet som uppgift, och autopilotens logg räknar hur ofta det lyfte en medalj. Idépanelen visar receptet, träffsäkerheten per receptyp och korstyp, och urvalet viktas efter den."
+    },
+    {
+      "kind": "combine",
+      "title": "Lyftbok med duellvy och träffsäkerhet",
+      "pitch": "Juryn skriver ett typmärkt lyftrecept per idé. Autopiloten ger det som uppgift åt avkomman och loggar om medaljen steg. Idépanelen jämför receptet per kriterium med syskonets och visar träffsäkerheten, som också viktar föräldra- och korstypsval."
+    },
+    {
+      "kind": "combine",
+      "title": "Lyftrecept styr korstyper",
+      "pitch": "Juryn skriver för varje idé ett \"lyftrecept\": vilken enskild ändring som ger nästa medalj, märkt med en typ (t.ex. originalitet, genomförbarhet). Autopiloten loggar vilka korstyper och recept som faktiskt lyfte medaljen, viktar urvalet därefter och visar träffsäkerheten per korstyp i idépanelen."
+    },
+    {
+      "kind": "combine",
+      "title": "Jämförbara lyftrecept med träffsäkerhet",
+      "pitch": "Juryn ger varje idé ett typmärkt lyftrecept. Idépanelen visar sida vid sida varför en idé slog en annan, per kriterium, plus recepttypens och korstypens träffsäkerhet från autopilotens logg. Urvalet viktas efter den träffsäkerheten."
+    },
+    {
+      "kind": "seed",
+      "title": "The autopilot should learn which kinds of crosses tend to produce gold on a board, and breed more of those.",
+      "pitch": ""
+    }
+  ],
+  "filmLine": "On a board where only 2 of 97 recipe children ever crossed a medal threshold, the app gave up waiting for the coarse ruler to move and started asking a blindfolded judge a simpler question: which of these two is better?",
+  "tests": "✔ diversity: the share of recent bred ideas carrying the top keyword; seeds and guests do not count (0.221333ms)\n✔ diversity pressure: in a monoculture every breed takes a parent from outside the theme, still by score (2.370917ms)\n✔ diversity pressure: no monoculture, or nothing outside it, breeds as before (0.609792ms)\n✔ diversity gauge: the series over time, when the monoculture began, and what the pressure did (0.490167ms)\nℹ tests 99\nℹ suites 0\nℹ pass 99\nℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 5350.648375"
+}

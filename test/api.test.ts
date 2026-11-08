@@ -19,6 +19,9 @@ let retrialScores: typeof judgeScores | null = null; // what the second judge (t
 let trialLot = 0.99; // placebo trials: the engine's lot; below PLACEBO_RATE sends a recipe breed to the placebo arm
 let liftCheckAnswer: { applied: boolean; reason: string } | null = null; // the recipe check's ruling; null: no boolean (unchecked)
 let liftCheckFails = false; // the recipe check's provider call throws
+let duelAnswer: Record<string, string> | null = null; // the blind duel's A/B/tie picks; null: no valid picks (no duel)
+let duelFails = false; // the duel's provider call throws
+let duelCoin = 0.9; // the engine's duel coin: below 0.5 shows the child as A
 let failNext: Error | null = null;
 let xCitations: string[] = [];
 
@@ -31,12 +34,14 @@ async function fakeChat(r: ChatRequest) {
     throw e;
   }
   if (liftCheckFails && r.schemaName === 'liftcheck') throw new Error('provider down');
+  if (duelFails && r.schemaName === 'duel') throw new Error('provider down');
   const n = calls.length;
   const value =
     r.schemaName === 'expand' ? { ideas: [1, 2, 3].map((k) => ({ title: `"Barn ${n}.${k}."`, pitch: `Pitch ${k}` })) }
     : r.schemaName === 'judgement' && retrialScores && r.model === settings.models.retrial ? { reason: 'Andra domaren tvekar.', ...retrialScores, keywords: judgeKeywords }
     : r.schemaName === 'judgement' ? { reason: 'Stark mekanism, oklar kund.', ...judgeScores, keywords: judgeKeywords, ...judgeLift }
     : r.schemaName === 'liftcheck' ? (liftCheckAnswer ?? { reason: 'Oklart.' })
+    : r.schemaName === 'duel' ? (duelAnswer ?? { reason: 'Oklart.' })
     : r.schemaName === 'summary' ? { headline: 'Tavlan rör sig mot ljud.', themes: [{ name: 'Ljud', insight: 'Allt låter.', ideas: ['Lånecyklar'] }], strongest: [{ title: 'Korsning', why: 'Konkret.' }], gaps: ['Ingen tänker på natten.'], nextSteps: ['Korsa A och B.'] }
     : r.schemaName === 'synthesis' ? { headline: 'Bänkarna dominerar.', insights: ['i1', 'i2', 'i3'], standouts: [{ title: 'Sjungande parkbänk', board: 'X', why: 'w' }], opportunities: ['o1', 'o2'], nextSteps: ['n1', 'n2'] }
     : r.schemaName === 'brief' ? { name: 'Sjungande bänk', slug: 'Sjungande Bänk!', oneLiner: 'En bänk som sjunger.', problem: 'P', audience: 'A', mvp: ['m1', 'm2'], outOfScope: ['o'], stack: 's', firstSteps: ['f1', 'f2'], openQuestions: ['q1'], risks: ['r1'] }
@@ -65,7 +70,7 @@ const pages: Record<string, { title: string; text: string }> = {
   'https://example.com/tom': { title: '', text: 'kort' },
 };
 const engine = createEngine({
-  repo, chat: fakeChat, settings: () => settings, gitInit: false, trialRng: () => trialLot,
+  repo, chat: fakeChat, settings: () => settings, gitInit: false, trialRng: () => trialLot, duelRng: () => duelCoin,
   fetchPage: async (url) => {
     if (!pages[url]) throw new Error('HTTP 404');
     return pages[url];
@@ -588,6 +593,89 @@ test('recipe check: after the verdict the judge model rules, blind to scores, wh
   }
 });
 
+test('blind duel: after the verdict, child and parent are compared blind in random order; the duel decides the recipe hit, never the medal', async () => {
+  const { liftStats, liftHit, duelStats } = await import('../public/js/evolve.js');
+  const { medal } = await import('../public/js/score.js');
+  try {
+    judgeScores = { originality: 3, feasibility: 3, impact: 3 }; // 9: bronze
+    judgeLift = { liftType: 'impact', lift: 'Mät minskade bilresor.' };
+    const board = await newBoard();
+    const s = await seed(board.id, 'Lånecykel i trapphuset');
+    await engine.idle();
+    assert.equal(repo.getIdea(s.id)!.duel, null, 'a seed has no parent, so no duel');
+
+    // The children stay bronze (no medal hit), but each wins impact in the duel. Child shown as A.
+    judgeLift = {};
+    duelCoin = 0.1;
+    duelAnswer = { reason: 'A mäter effekten.', originality: 'tie', feasibility: 'B', impact: 'A' };
+    const before = calls.length;
+    const { data } = await api('POST', `/api/ideas/${s.id}/expand`, {});
+    await engine.idle();
+    const duels = calls.slice(before).filter((c) => c.schemaName === 'duel');
+    assert.equal(duels.length, 3, 'one duel per recipe child');
+    assert.match(duels[0].user, /Idea A:\n"?Barn[\s\S]*Idea B:\nLånecykel i trapphuset/, 'coin < 0.5: the child is A');
+    assert.doesNotMatch(duels[0].user, /Mät minskade bilresor|Stark mekanism|bronze|silver|\/15|parent|recipe|child/i, 'blind: no recipe, verdict, medal or lineage');
+    assert.equal(duels[0].model, settings.models.judge);
+    for (const i of data.ideas) {
+      const k = repo.getIdea(i.id)!;
+      assert.deepEqual([k.duel!.originality, k.duel!.feasibility, k.duel!.impact, k.duel!.childFirst], ['tie', 'parent', 'child', true]);
+      assert.equal(medal(k), 1, 'the medal stays the jury\'s');
+      assert.equal(k.originality, 3);
+      assert.equal(liftHit(k), true, 'the duel on impact decides the hit, not the medal');
+    }
+    assert.deepEqual(liftStats(repo.listIdeas(board.id)).impact, { tries: 3, hits: 3 });
+    const { data: payload } = await api('GET', `/api/boards/${board.id}`);
+    assert.equal(payload.ideas.find((i: any) => i.id === data.ideas[0].id).duel.impact, 'child', 'the board payload carries the duel');
+
+    // Re-judging does not re-duel.
+    const n = calls.length;
+    await api('POST', `/api/ideas/${data.ideas[0].id}/judge`, {});
+    await engine.idle();
+    assert.equal(calls.slice(n).filter((c) => c.schemaName === 'duel').length, 0);
+
+    // Child shown as B: the same A/B answer now means the parent won impact. A miss, though the medal rose.
+    duelCoin = 0.9;
+    judgeScores = { originality: 4, feasibility: 4, impact: 3 }; // 11: silver
+    const e2 = await api('POST', `/api/ideas/${s.id}/expand`, {});
+    await engine.idle();
+    const k2 = repo.getIdea(e2.data.ideas[0].id)!;
+    assert.deepEqual([k2.duel!.feasibility, k2.duel!.impact, k2.duel!.childFirst], ['child', 'parent', false]);
+    assert.equal(medal(k2), 2);
+    assert.equal(liftHit(k2), false);
+    const st = duelStats(repo.listIdeas(board.id));
+    assert.deepEqual([st.n, st.duelHits, st.medalHits], [6, 3, 3]);
+    assert.deepEqual(st.byCriterion.impact, { child: 3, parent: 3, tie: 0 });
+
+    // An incomplete duel, or a failing one, leaves no duel; the medal rule decides as before, and the verdict stands.
+    duelAnswer = { reason: 'x', originality: 'A', feasibility: 'maybe', impact: 'A' };
+    const e3 = await api('POST', `/api/ideas/${s.id}/expand`, {});
+    duelFails = true;
+    const e4 = await api('POST', `/api/ideas/${s.id}/expand`, {});
+    await engine.idle();
+    for (const i of [...e3.data.ideas, ...e4.data.ideas]) {
+      const k = repo.getIdea(i.id)!;
+      assert.equal(k.duel, null);
+      assert.ok(k.judgedAt && k.originality === 4, 'judged all the same');
+      assert.equal(liftHit(k), true, 'no duel: the medal rose, so it is a hit');
+    }
+
+    // Placebo children get no duel.
+    duelFails = false;
+    trialLot = 0;
+    const m = calls.length;
+    await api('POST', `/api/ideas/${s.id}/expand`, {});
+    await engine.idle();
+    assert.equal(calls.slice(m).filter((c) => c.schemaName === 'duel').length, 0);
+  } finally {
+    trialLot = 0.99;
+    duelAnswer = null;
+    duelFails = false;
+    duelCoin = 0.9;
+    judgeLift = {};
+    judgeScores = { originality: 3, feasibility: 3, impact: 3 };
+  }
+});
+
 test('lift recipes: an old database gets the new columns', async () => {
   const { DatabaseSync } = await import('node:sqlite');
   const file = join(mkdtempSync(join(tmpdir(), 'ideagen-olddb-')), 'old.db');
@@ -613,6 +701,9 @@ test('lift recipes: an old database gets the new columns', async () => {
   assert.equal(r.getIdea(k.id)!.liftApplied, null);
   r.saveLiftCheck(k.id, { applied: true, reason: 'Ja.' });
   assert.deepEqual([r.getIdea(k.id)!.liftApplied, r.getIdea(k.id)!.liftCheck], [true, 'Ja.'], 'the recipe-check columns were added too');
+  assert.equal(r.getIdea(k.id)!.duel, null);
+  r.saveDuel(k.id, { originality: 'tie', feasibility: 'parent', impact: 'child', reason: 'r', childFirst: true, model: 'm', at: 'now' });
+  assert.equal(r.getIdea(k.id)!.duel!.impact, 'child', 'the duel column was added too');
   const e = r.insertIdea({ boardId: b.id, title: 'E', pitch: '', kind: 'expand', x: 0, y: 0, generation: 1, escape: 'lift recipe' }, [i.id]);
   assert.equal(r.getIdea(e.id)!.escape, 'lift recipe', 'the escape column was added too');
   assert.equal(got.escape, null);

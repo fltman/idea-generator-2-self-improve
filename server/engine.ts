@@ -81,6 +81,8 @@ type Deps = {
   selfContext?: () => string;
   /** Placebo trials: the lot that sends a recipe breed to the placebo arm (tests fix it). */
   trialRng?: () => number;
+  /** Blind duel: the coin that decides whether the child is shown as A or B (tests fix it). */
+  duelRng?: () => number;
 };
 
 export function createEngine(deps: Deps) {
@@ -90,6 +92,7 @@ export function createEngine(deps: Deps) {
   const reveal = deps.reveal ?? ((p: string) => execFile('open', [p], () => {}));
   const llm = makeLLM(deps.chat);
   const trialRng = deps.trialRng ?? Math.random;
+  const duelRng = deps.duelRng ?? Math.random;
   const bus = createBus();
   const judging = new Set<number>();
 
@@ -185,6 +188,8 @@ export function createEngine(deps: Deps) {
       emitIdeas(board.id, [out.idea]);
       // A recipe child: did it really carry out the recipe? Only an applied recipe's hit counts.
       out.idea = (await checkLift(board, out.idea)) ?? out.idea;
+      // ...and did it beat its parent, read blind side by side? The duel decides the recipe's hit.
+      out.idea = (await duelLift(board, out.idea)) ?? out.idea;
       // A verdict one point from another medal gets a blind second opinion, in the background.
       if (autoRetrial(board, out.idea)) queueRetrial(out.idea.id);
       return out;
@@ -213,6 +218,39 @@ export function createEngine(deps: Deps) {
       );
       if (r.applied == null) return null;
       const saved = repo.saveLiftCheck(idea.id, { applied: r.applied, reason: r.reason })!;
+      emitIdeas(board.id, [saved]);
+      return saved;
+    } catch {
+      return null;
+    }
+  }
+
+  // ---------------------------------------------------------------- blind duel
+
+  /**
+   * After a recipe-arm child is judged, the judge model reads child and parent
+   * side by side as "A" and "B", in an order decided by a coin, with no
+   * recipe, scores, medals or lineage, and picks a winner per criterion. The
+   * winner on the recipe's own criterion decides the recipe's hit
+   * (liftHit()); the medal and the scores stay what the jury gave. Once per
+   * child (the texts do not change on a re-judge). A failed or incomplete
+   * duel leaves the child without one; it never fails the verdict.
+   */
+  async function duelLift(board: Board, idea: Idea): Promise<Idea | null> {
+    if (armOf(idea) !== 'recipe' || idea.duel || !idea.liftFrom) return null;
+    const parent = repo.getIdea(idea.liftFrom);
+    if (!parent) return null;
+    const childFirst = duelRng() < 0.5;
+    const model = modelFor(board, 'judge');
+    try {
+      const r = await call(board.id, () =>
+        llm.duel({ model, a: childFirst ? idea : parent, b: childFirst ? parent : idea, lang: board.config.lang }),
+      );
+      const side = (v: 'A' | 'B' | 'tie' | null) =>
+        v === 'tie' ? 'tie' : v === 'A' ? (childFirst ? 'child' : 'parent') : v === 'B' ? (childFirst ? 'parent' : 'child') : null;
+      const [o, f, i] = [side(r.originality), side(r.feasibility), side(r.impact)];
+      if (!o || !f || !i) return null;
+      const saved = repo.saveDuel(idea.id, { originality: o, feasibility: f, impact: i, reason: r.reason, childFirst, model, at: new Date().toISOString() })!;
       emitIdeas(board.id, [saved]);
       return saved;
     } catch {
