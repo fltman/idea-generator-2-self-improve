@@ -65,7 +65,7 @@ const FOCUS = {
   },
   ops: {
     goal: 'Make Idea Generator 2 faster, cheaper and sturdier to run: fewer and cheaper model calls per medal, less waiting, graceful recovery when a provider fails or the server restarts, and clear numbers on what each board and role costs. Every idea is a concrete change to this app that Claude Code can build, test and document in one unattended session.',
-    impact: 'IMPACT here means impact on running the app: dollars or seconds saved per medal, fewer failed or lost steps, faster recovery after errors and restarts, or costs the user can see and act on. A change that saves nothing measurable, or only measures the jury or the evolution, scores at most 2. Cosmetic tweaks score at most 2.',
+    impact: 'IMPACT here means impact on running the app: dollars or seconds saved per medal, fewer failed or lost steps, faster recovery after errors and restarts, or costs the user can see and act on. A change that saves nothing measurable, or only measures the jury or the evolution, scores at most 2. Cosmetic tweaks score at most 2. A change that switches the jury's or the second judge's model without a human first running the calibration (npm run calibrate) scores at most 2: a coding agent can never calibrate, and an uncalibrated jury changes what every medal means. A shadow jury that never sets the medal, or a cheaper model for breeding roles (branch, cross), is fine.',
     research: 'LLM inference cost reduction, prompt caching, robust LLM pipelines, fault-tolerant job queues',
     seeds: [
       'The overview shows dollars and seconds per medal for each role, so you can see which step of the loop costs the most.',
