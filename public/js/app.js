@@ -9,7 +9,7 @@ import { medal, scoreSum, fitness, CRITERIA, isJudged, onMedalEdge, confidenceBa
 import {
   evolutionStats, liftStats, LIFT_TYPES, doubtPenalty, armOf, armHit, trialStats, trialVerdict, ARMS, TRIAL_MIN,
   diversity, diversitySeries, pressureStats, MONOCULTURE_SHARE, DIVERSITY_WINDOW, netLiftStats, CONTROL_EVERY,
-  appliedStatus, appliedStats, APPLIED_STATUSES,
+  appliedStatus, appliedStats, APPLIED_STATUSES, duelHit, duelStats,
 } from './evolve.js';
 
 /** A net lift in medal steps, signed, two decimals: +0.33, −0.50, ±0.00. */
@@ -433,6 +433,7 @@ function liftBlock(idea) {
       h('div', { class: hit == null ? 'muted' : hit ? 'lift-hit' : 'lift-miss' },
         hit == null ? t('liftTaskPending') : hit ? t('liftTaskHit') : t('liftTaskMiss')),
       appliedLine(idea),
+      duelLine(idea),
     );
   }
   if (!recipe && !task) return null;
@@ -526,6 +527,55 @@ function liftOverview(ideas) {
         : t(`trial_${v.verdict}`, { r: pct(stats.recipe.total), p: pct(stats.placebo.total) })) : null,
     any ? netChips(ideas) : null,
     any ? appliedSplit(ideas) : null,
+    any ? duelSplit(ideas) : null,
+  );
+}
+
+const DUEL_MARK = { child: '▲', parent: '▼', tie: '=' };
+
+/**
+ * A recipe child's blind duel against its parent: one badge per criterion
+ * (child won, parent won, tie), the recipe's own criterion ringed, and what
+ * the duel made of the recipe. null for other arms and for children with no duel.
+ */
+function duelLine(idea) {
+  if (armOf(idea) !== 'recipe' || !idea.duel) return null;
+  const hit = duelHit(idea);
+  const ignored = idea.liftApplied === false;
+  return h('div', { class: 'duel', title: t('duelHint') },
+    h('div', { class: 'duel-head' }, `⇄ ${t('duelTitle')}`),
+    h('div', { class: 'duel-badges' },
+      CRITERIA.map((c) => {
+        const w = idea.duel[c];
+        return h('span', {
+          class: `duel-badge ${w}${c === idea.liftType ? ' recipe' : ''}`,
+          title: t(`duel_${w}`), 'aria-label': `${t(c)}: ${t(`duel_${w}`)}`,
+        }, `${DUEL_MARK[w] ?? '?'} ${t(c)}`);
+      })),
+    h('div', { class: ignored ? 'muted' : hit ? 'lift-hit' : 'lift-miss' },
+      ignored ? t('duelIgnored') : t(hit ? 'duelHit' : 'duelMiss', { type: t(idea.liftType).toLowerCase() })),
+    idea.duel.reason ? h('div', { class: 'muted duel-reason' }, idea.duel.reason) : null,
+  );
+}
+
+/** Overview: on the same recipe children, how often the blind duel and the medal call a hit, and who won each criterion. */
+function duelSplit(ideas) {
+  const s = duelStats(ideas);
+  if (!s.n) return null;
+  const pct = (k) => Math.round((100 * k) / s.n);
+  return h('div', { class: 'duel-split' },
+    h('span', { class: 'muted', title: t('duelHint') }, t('duelSplitTitle', { n: s.n })),
+    h('div', { class: 'applied-cells' },
+      h('span', { class: 'applied-cell' }, t('duelSplitDuel'), ' ', h('b', {}, `${s.duelHits}/${s.n}`), h('span', { class: 'muted' }, ` ${pct(s.duelHits)}%`)),
+      h('span', { class: 'applied-cell' }, t('duelSplitMedal'), ' ', h('b', {}, `${s.medalHits}/${s.n}`), h('span', { class: 'muted' }, ` ${pct(s.medalHits)}%`))),
+    h('div', { class: 'duel-badges' },
+      LIFT_TYPES.map((c) => {
+        const b = s.byCriterion[c];
+        return h('span', { class: 'duel-tally', title: t('duelTallyHint') },
+          `${t(c)} `, h('span', { class: 'duel-badge child' }, `▲${b.child}`), ' ',
+          h('span', { class: 'duel-badge parent' }, `▼${b.parent}`), ' ',
+          h('span', { class: 'duel-badge tie' }, `=${b.tie}`));
+      })),
   );
 }
 
