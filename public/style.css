@@ -428,3 +428,9 @@ body.exhibit #seed-input { font-size: 20px; padding: 18px 22px; }
 /* Spores */
 .spore-list { margin: 4px 0 0; padding-left: 0; list-style: none; font-size: 12px; }
 .spore-list li { margin: 2px 0; }
+
+/* Flight recorder (build 0013) */
+.recorder-chip { border: 1px solid var(--line); border-radius: 999px; padding: 1px 8px; font-size: 11px; color: var(--text-2); white-space: nowrap; }
+.recorder-chip.lost { border-color: #e5b45a; color: #e5b45a; }
+table.recorder-table td { font-variant-numeric: tabular-nums; }
+table.recorder-table .recorder-total th, table.recorder-table .recorder-total td { border-top: 1px solid var(--line); font-weight: 600; }

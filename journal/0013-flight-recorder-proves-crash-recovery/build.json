@@ -1,0 +1,86 @@
+{
+  "seq": 13,
+  "title": "Flight Recorder Proves Crash Recovery",
+  "pitch": "Like an aviation black box that logs every flight and is then used to certify crash survival: the model wrapper writes each call to a SQLite `calls` table. A kill-and-restart test asserts one idea row and one judge call from it. The overview shows a restart chip and seconds and dollars per medal per role.",
+  "status": "merged",
+  "trigger": "hand",
+  "branch": "build/0013-flight-recorder-proves-crash-recovery",
+  "commit": null,
+  "summary": "Built the flight recorder. Every model call now goes through engine.call() and is written to a new SQLite `calls` table: a row is opened before the call and closed after it with role, idea, dollars and seconds, or marked failed. At boot, recordBoot() marks rows a crash left open as lost. Once settings arrive, engine.recover() queues those judgements (and second opinions) again, but never redoes breeds. The overview has a new \"Flight recorder\" card showing calls, $ per medal and seconds per medal for each role, plus a restart chip. Five new tests (129 in all, all passing) include a real kill -9 of a spawned server mid-judgement. After the restart they check for one idea row and exactly one lost and one finished judge call.",
+  "error": null,
+  "costUsd": 3.64,
+  "sessionId": "fa1bdd52-3265-4765-9004-e78fea40a4ca",
+  "createdAt": "2026-11-08 16:13:16",
+  "startedAt": "2026-11-08 16:20:49",
+  "finishedAt": "2026-11-08 16:31:18",
+  "jury": {
+    "originality": 3,
+    "feasibility": 4,
+    "impact": 4,
+    "reason": "A persistent calls table gives real per-role cost and seconds per medal plus a testable restart guarantee, but the app may already track costs and the idea is somewhat broad."
+  },
+  "lineage": [
+    {
+      "kind": "expand",
+      "title": "Black-Box Crash Test With Restart Chip",
+      "pitch": "Like a car crash-test lab, one test script kills the server mid-judgement, restarts it, and asserts exactly one idea row and one judge call. A single pending-row flag marks the step resumed; the overview shows a restart-count chip."
+    },
+    {
+      "kind": "expand",
+      "title": "Calls Table: Seconds Per Medal Target",
+      "pitch": "Add one SQLite `calls` table (role, usd, seconds, idea_id, ts) written by the model wrapper, no cache, no new dependencies. Metric: share of calls logged, target 100%, checked by a test. The overview shows a $/s-per-medal row per role."
+    },
+    {
+      "kind": "expand",
+      "title": "Steps Table With Single-Resume Flag",
+      "pitch": "A new `steps` table (id, board_id, kind, idea_id, payload, status, resumes) holds one pending row per judgement or autopilot step. The row is marked done in the same SQLite transaction as the idea insert. On boot, rows resume once; the overview shows restart count."
+    },
+    {
+      "kind": "combine",
+      "title": "Role-Costed Verdict Store Ranked by Payback",
+      "pitch": "For Anders: every model call logs role, USD and seconds into a call ledger; a SQLite verdict store, keyed by a hash of normalized text, parent and style, is consulted before judge, recipe-check and duel calls. The overview shows $/s per medal by role, plus hits and savings, and caches the costliest role first."
+    },
+    {
+      "kind": "expand",
+      "title": "Pending Rows Like a Restaurant Order Rail",
+      "pitch": "Like a kitchen order rail where tickets stay until plated, a new `steps` table holds each judgement and autopilot step as a pending row. On boot, leftover rows resume. Test: kill mid-step, show restart log."
+    },
+    {
+      "kind": "seed",
+      "title": "The overview shows dollars and seconds per medal for each role, so you can see which step of the loop costs the most.",
+      "pitch": ""
+    },
+    {
+      "kind": "combine",
+      "title": "Shared-Prefix Verdict Store With Savings",
+      "pitch": "For Anders: a persistent SQLite table keyed by a hash of normalized idea text, parent and style stores verdicts. Judge retries, restarts and near-duplicates read it; misses send the judge, recipe-check and duel calls a cached shared prefix. The overview shows per-board hits and USD/seconds saved."
+    },
+    {
+      "kind": "seed",
+      "title": "After a server restart, queued judgements and half-finished autopilot steps resume instead of being lost.",
+      "pitch": ""
+    },
+    {
+      "kind": "combine",
+      "title": "Near-Duplicate Verdict Reuse Ledger",
+      "pitch": "Anders sees a new idea judged in 0 seconds at $0 because it matches a board idea (normalized text, same parent and style); its scores are reused. The overview's per-role dollars/seconds-per-medal table gains a \"judge: saved $, hit rate\" chip."
+    },
+    {
+      "kind": "combine",
+      "title": "Prompt Prefix Cache With Savings Ledger",
+      "pitch": "Anders opens the overview and sees the duel step cost 31% less per medal. The judge, recipe-check and duel calls share a cached static prefix and parent text; each role's measured USD and seconds saved per medal show beside its cost."
+    },
+    {
+      "kind": "seed",
+      "title": "Skip the judge call for an exact repeat of an idea already on the board, and count the dollars saved.",
+      "pitch": ""
+    },
+    {
+      "kind": "combine",
+      "title": "Verdict Cache With Fallback Provenance",
+      "pitch": "Target: cut judge dollars per medal 15% on each board. Near-duplicates (normalized text, same parent and style) reuse cached scores, tagged with the model that judged them. A failed call retries once on a fallback model, and a cached verdict is reused only if it came from a primary-model judgement. Overview chip: saved USD, hit rate."
+    }
+  ],
+  "filmLine": "The app learned to keep a black box: it killed its own server mid-verdict and watched the same idea get judged once, after the restart, with no copy left behind.",
+  "tests": "✔ sporeRooted and sporeStats: a medal where it landed is a root; children count for arrivals (0.115166ms)\n✔ autopilot: a spore board sends its best idea to the spore board it fits, once, and the guest is judged there (27.099916ms)\n✔ spores off: the autopilot never sends anything (18.583083ms)\n✔ autopilot: an idea that is built or being built never leaves as a spore (13.70225ms)\nℹ tests 129\nℹ suites 0\nℹ pass 129\nℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 5662.813917"
+}

@@ -772,3 +772,25 @@ export function scrapStats(ideas) {
     survivors: judged.filter((i) => i.scrap && medal(i) >= 1).sort((a, b) => fitness(b) - fitness(a) || b.id - a.id),
   };
 }
+
+// ---------------------------------------------------------------- flight recorder (build 0013)
+
+/**
+ * Seconds and dollars per medal, per role. `recorder` is the server's
+ * callStats() (roles: role, n, failed, lost, usd, seconds); the medals are the
+ * board's ideas with bronze or better (jury or hand). Each role's total is
+ * divided by all the board's medals, not by the medals that role helped make:
+ * every step of the loop pays for the medals together. null per medal when the
+ * board has none yet. Measured, never used: nothing in selection reads it.
+ */
+export function flightStats(recorder, ideas) {
+  const medals = ideas.filter((i) => (medal(i) ?? 0) >= 1).length;
+  const per = (x) => (medals ? x / medals : null);
+  const rows = (recorder?.roles ?? []).map((r) => ({ ...r, usdPerMedal: per(r.usd), secPerMedal: per(r.seconds) }));
+  const sum = (k) => rows.reduce((s, r) => s + (r[k] ?? 0), 0);
+  const total = {
+    role: 'total', n: sum('n'), failed: sum('failed'), lost: sum('lost'),
+    usd: sum('usd'), seconds: sum('seconds'), usdPerMedal: per(sum('usd')), secPerMedal: per(sum('seconds')),
+  };
+  return { medals, rows, total, restarts: recorder?.restarts ?? 0, lost: recorder?.lost ?? 0, lastRestart: recorder?.lastRestart ?? null };
+}
