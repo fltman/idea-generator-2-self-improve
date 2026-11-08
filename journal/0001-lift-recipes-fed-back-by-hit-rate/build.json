@@ -1,0 +1,61 @@
+{
+  "seq": 1,
+  "title": "Lift Recipes Fed Back by Hit Rate",
+  "pitch": "The jury writes a typed one-medal lift recipe per idea. The autopilot hands it to the offspring as its task, then logs whether the medal rose. Parent and cross-type picks are weighted by each recipe type's hit rate, shown in the panel.",
+  "status": "merged",
+  "trigger": "hand",
+  "branch": "build/0001-lift-recipes-fed-back-by-hit-rate",
+  "commit": null,
+  "summary": "The jury now writes a lift recipe for every idea: one change that would earn the next medal, tagged with one of the three criteria. Children get it as their task in the branch or cross prompt and store their parent's medal, so the code can count whether the medal rose. Hit rates per type decide which parent's recipe a cross passes on and shift tournament selection by less than half a point, which only breaks ties. The idea panel shows the recipe, the hit rate for its type and a child's ✓/✗; the overview shows hits per type. 71 tests pass (7 new). The jury has not been recalibrated after the schema change, and the after screenshots use recipe data staged in the browser, which the journal states.",
+  "error": null,
+  "costUsd": 2.64,
+  "sessionId": "163bda03-f9ea-4ba3-a8b2-f226f69a49a9",
+  "createdAt": "2026-11-08 07:38:46",
+  "startedAt": "2026-11-08 07:38:46",
+  "finishedAt": "2026-11-08 07:45:50",
+  "jury": {
+    "originality": 4,
+    "feasibility": 3,
+    "impact": 4,
+    "reason": "Closes a feedback loop by learning which lift-recipe types actually raise medals, steering evolution with data; but it touches jury, autopilot and panel, and recipe typing could be noisy."
+  },
+  "lineage": [
+    {
+      "kind": "seed",
+      "title": "Jury says what would lift each idea one medal",
+      "pitch": "When the jury scores an idea, it should also say what would lift it one medal, and the next generation should try exactly that."
+    },
+    {
+      "kind": "combine",
+      "title": "Lyftrecept med mätt träffsäkerhet",
+      "pitch": "Juryn skriver ett typmärkt lyftrecept per idé. Autopiloten ger det som uppgift åt avkomman, loggar om medaljen lyfte per recepttyp och korstyp, och viktar både föräldraval och korstyp efter träffsäkerheten, som visas i idépanelen."
+    },
+    {
+      "kind": "combine",
+      "title": "Lyftrecept styr korstyper",
+      "pitch": "Juryn skriver för varje idé ett \"lyftrecept\": vilken enskild ändring som ger nästa medalj, märkt med en typ (t.ex. originalitet, genomförbarhet). Autopiloten loggar vilka korstyper och recept som faktiskt lyfte medaljen, viktar urvalet därefter och visar träffsäkerheten per korstyp i idépanelen."
+    },
+    {
+      "kind": "combine",
+      "title": "Lyftrecept som mäts och styr urvalet",
+      "pitch": "Juryn ger varje idé ett typmärkt lyftrecept (kriterium + typ, t.ex. \"skärp genomförbarhet\"). Nästa generation får receptet som uppgift, och autopilotens logg räknar hur ofta det lyfte en medalj. Idépanelen visar receptet, träffsäkerheten per receptyp och korstyp, och urvalet viktas efter den."
+    },
+    {
+      "kind": "seed",
+      "title": "The autopilot should learn which kinds of crosses tend to produce gold on a board, and breed more of those.",
+      "pitch": ""
+    },
+    {
+      "kind": "combine",
+      "title": "Jämförbara lyftrecept med träffsäkerhet",
+      "pitch": "Juryn ger varje idé ett typmärkt lyftrecept. Idépanelen visar sida vid sida varför en idé slog en annan, per kriterium, plus recepttypens och korstypens träffsäkerhet från autopilotens logg. Urvalet viktas efter den träffsäkerheten."
+    },
+    {
+      "kind": "seed",
+      "title": "People watching the board cannot tell why one idea won over another: make the jury’s reasoning visible and comparable.",
+      "pitch": ""
+    }
+  ],
+  "filmLine": "On its first build the app taught its jury to say what would make each idea better, and then started keeping score on whether that advice was any good.",
+  "tests": "✔ lift rate is smoothed: 0.5 with no data, never 0 or 1 (0.094916ms)\n✔ only a judged, non-gold idea with a whole recipe hands one on (0.115459ms)\n✔ a cross takes the recipe whose type has lifted more often (0.095125ms)\n✔ the hit-rate nudge breaks ties in selection but never beats a point of jury score (20.554333ms)\nℹ tests 71\nℹ suites 0\nℹ pass 71\nℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 3020.641334"
+}
