@@ -64,7 +64,7 @@ Needs Node 25 or newer, which runs TypeScript directly (there is no build step),
 npm install             # one dependency: @anthropic-ai/sdk
 npm run dev             # http://localhost:8301 — restarts itself when a build is merged
 npm run self:setup      # once, in another terminal: creates the self-improvement board (autopilot on)
-npm test                # 63 tests, fake LLM, fake claude CLI, fake agent; no network
+npm test                # 64 tests, fake LLM, fake claude CLI, fake agent; no network
 npm run calibrate       # real judge vs. reference ideas (claudecode:sonnet ≈ $0.13)
 npm run shoot -- --help # the screenshot tool the builder's agent uses
 ```

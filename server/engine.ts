@@ -284,7 +284,7 @@ export function createEngine(deps: Deps) {
         );
         ({ title, pitch } = idea);
         sourceUrl = url;
-      } else if (text.length > 160) {
+      } else if (text.length > 120) { // longer than a title: distill it, never cut it off
         const { idea } = await call(board.id, () => llm.distill({ model: modelFor(board, 'distill'), flow, board, text, lang }));
         ({ title, pitch } = idea);
       }

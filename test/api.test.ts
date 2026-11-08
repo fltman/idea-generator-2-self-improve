@@ -398,3 +398,13 @@ test('report: totals, every project, per-board insights, saved conclusions, Mark
   assert.match(md, /## Slutsatser/);
   assert.match(md, /cd ".*sjungande-bank" && claude/);
 });
+
+test('a typed seed longer than a title is distilled, never cut off', async () => {
+  const board = await newBoard();
+  const text = 'When the jury scores an idea, it should also say what would lift it one medal, and the next generation should try exactly that.';
+  assert.ok(text.length > 120 && text.length <= 160);
+  const { data } = await api('POST', `/api/boards/${board.id}/seed`, { text });
+  assert.equal(data.idea.title, 'Destillerat frö');
+  assert.ok(calls.some((c) => c.schemaName === 'seed' && c.user.includes('next generation')));
+  await engine.idle();
+});

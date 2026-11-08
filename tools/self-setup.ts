@@ -36,9 +36,9 @@ ORIGINALITY is judged against what the app already does (listed below). A featur
 An idea that does not say what the user would see, or how to verify it, scores at most 3 on feasibility.`;
 
 const SEEDS = [
-  'The autopilot should learn which kinds of crosses tend to produce gold on a board, and breed more of those.',
-  'When the jury scores an idea, it should also say what would lift it one medal, and the next generation should try exactly that.',
-  'People watching the board cannot tell why one idea won over another: make the jury’s reasoning visible and comparable.',
+  'The autopilot learns which kinds of crosses produce gold on a board and breeds more of those.',
+  'The jury says what would lift each idea one medal; the next generation tries exactly that.',
+  'Show viewers why one idea beat another: the jury’s reasons side by side.',
 ];
 
 const CC = 'claudecode:sonnet';
