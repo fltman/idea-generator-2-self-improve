@@ -649,3 +649,126 @@ export function sporeStats(out, ideas, edges = []) {
     arrived: { ...count(arrived), children: arrived.reduce((s, g) => s + kids(g.id), 0) },
   };
 }
+
+// ---------------------------------------------------------------- scrap heap
+// Build 0012. A wilted idea has bred WILT_CHILDREN or more judged children and
+// none rose above its own medal: selection keeps picking it, and it keeps
+// failing to pass anything on. Every SCRAP_EVERY bred ideas (or when the
+// autopilot has nothing else to do) a board with the scrap heap on draws one
+// wilted idea by lot, weighted by how unlike the living pool its keywords are,
+// and crosses it with the fittest living idea. The task is the jury's own
+// reason for the wilted idea's score. The child remembers where it came from
+// (idea.scrap) and the overview compares the medal rate of scrap children with
+// normal breeds. Measured and shown; selection treats scrap children like any other.
+
+/** Judged children an idea must have bred, none above its medal, to count as wilted. */
+export const WILT_CHILDREN = 5;
+/** Bred ideas on a board between two scrap draws. */
+export const SCRAP_EVERY = 8;
+/** Lowest draw weight, so a wilted idea close to the pool can still come up. */
+export const SCRAP_FLOOR = 0.1;
+/** The gap (scrap medal rate minus normal medal rate) the scrap heap aims for, in percentage points. */
+export const SCRAP_TARGET = 10;
+/** Fewer judged scrap children than this, and the gap reads "too early". */
+export const SCRAP_MIN = 10;
+
+const isBred = (i) => i.kind === 'expand' || i.kind === 'combine';
+
+/** Wilted ideas: own (not guests), judged below gold with a jury reason, WILT_CHILDREN+ judged children, none above its medal. */
+export function wilted(ideas, edges) {
+  const byId = new Map(ideas.map((i) => [i.id, i]));
+  const kids = new Map();
+  for (const e of edges) {
+    const c = byId.get(e.to);
+    if (!c || medal(c) == null) continue;
+    if (!kids.has(e.from)) kids.set(e.from, []);
+    kids.get(e.from).push(c);
+  }
+  return ideas.filter((i) => {
+    const m = medal(i);
+    const ks = kids.get(i.id) ?? [];
+    return i.kind !== 'guest' && isJudged(i) && !!i.reason && m < 3 && ks.length >= WILT_CHILDREN && ks.every((c) => medal(c) <= m);
+  });
+}
+
+/**
+ * How unlike the living pool an idea's keywords are, 0–1: one minus the mean
+ * share of living ideas that carry each of its keywords. null: no keywords.
+ */
+export function keywordDistance(idea, living) {
+  const kws = [...new Set(idea?.keywords ?? [])];
+  if (!kws.length) return null;
+  const others = living.filter((i) => i.id !== idea.id);
+  if (!others.length) return 1;
+  const share = (k) => others.filter((i) => i.keywords?.includes(k)).length / others.length;
+  return 1 - kws.reduce((s, k) => s + share(k), 0) / kws.length;
+}
+
+/** Is the board due for a scrap draw? SCRAP_EVERY bred ideas newer than its last scrap child. */
+export function scrapDue(ideas) {
+  const last = ideas.reduce((m, i) => (i.scrap ? Math.max(m, i.id) : m), 0);
+  return ideas.filter((i) => i.id > last && isBred(i) && !i.scrap).length >= SCRAP_EVERY;
+}
+
+/**
+ * The scrap draw: one wilted idea not drawn before, by lot weighted by its
+ * keyword distance from the living pool (at least SCRAP_FLOOR), and as its
+ * partner the fittest living idea it has not been crossed with (on a tie the
+ * one sharing fewest keywords, then the older).
+ * @returns {{wilt, partner, distance:number|null} | null}
+ */
+export function drawScrap(ideas, edges, rng = Math.random) {
+  const wilt = wilted(ideas, edges);
+  const wiltIds = new Set(wilt.map((i) => i.id));
+  const drawn = new Set(ideas.filter((i) => i.scrap).map((i) => i.scrap.from));
+  const living = population(ideas).filter((i) => !wiltIds.has(i.id));
+  const used = usedPairs(ideas, edges);
+  const cands = wilt
+    .filter((w) => !drawn.has(w.id) && living.some((p) => !used.has(pairKey(w.id, p.id))))
+    .map((w) => {
+      const distance = keywordDistance(w, living);
+      return { w, distance, weight: Math.max(SCRAP_FLOOR, distance ?? 0) };
+    });
+  if (!cands.length) return null;
+  let r = rng() * cands.reduce((s, c) => s + c.weight, 0);
+  let pick = cands[cands.length - 1];
+  for (const c of cands) {
+    r -= c.weight;
+    if (r < 0) {
+      pick = c;
+      break;
+    }
+  }
+  const overlap = (p) => (p.keywords ?? []).filter((k) => pick.w.keywords?.includes(k)).length;
+  const partner = living
+    .filter((p) => !used.has(pairKey(pick.w.id, p.id)))
+    .sort((a, b) => fitness(b) - fitness(a) || overlap(a) - overlap(b) || a.id - b.id)[0];
+  return { wilt: pick.w, partner, distance: pick.distance };
+}
+
+/**
+ * Scrap children versus normal breeds (expand and cross children that are not
+ * scrap): judged n, medals (bronze or better: the survivors) and rate; the gap
+ * in percentage points; the mean draw distance; and the survivors, best first.
+ */
+export function scrapStats(ideas) {
+  const judged = ideas.filter((i) => isBred(i) && medal(i) != null);
+  const cell = (list) => {
+    const medals = list.filter((i) => medal(i) >= 1).length;
+    return { n: list.length, medals, rate: list.length ? medals / list.length : null };
+  };
+  const scrap = cell(judged.filter((i) => i.scrap));
+  const normal = cell(judged.filter((i) => !i.scrap));
+  const dists = ideas.filter((i) => i.scrap && typeof i.scrap.distance === 'number').map((i) => i.scrap.distance);
+  const gap = scrap.rate == null || normal.rate == null ? null : Math.round((scrap.rate - normal.rate) * 100);
+  return {
+    drawn: ideas.filter((i) => i.scrap).length,
+    scrap,
+    normal,
+    gap,
+    early: scrap.n < SCRAP_MIN,
+    onTarget: gap != null && gap >= SCRAP_TARGET,
+    distance: dists.length ? dists.reduce((s, d) => s + d, 0) / dists.length : null,
+    survivors: judged.filter((i) => i.scrap && medal(i) >= 1).sort((a, b) => fitness(b) - fitness(a) || b.id - a.id),
+  };
+}

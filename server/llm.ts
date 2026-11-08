@@ -26,6 +26,14 @@ export const PLACEBO_TASK = 'Your task: improve it.';
 
 /** The task line for a child bred under a lift recipe. */
 function liftTaskText(t: LiftTask | null | undefined, many = false) {
+  // Scrap heap (build 0012): a wilted idea's own jury reason is the task.
+  if (t?.arm === 'scrap' && t.change) {
+    return [
+      `The jury's verdict on "${t.from.title}" (an idea that has bred many children and none rose above it):`,
+      t.change,
+      `Your task: ${many ? 'every new idea' : 'the new idea'} must overcome what this verdict says held it back, while staying a whole, concrete idea.`,
+    ].join('\n');
+  }
   // The no-task arm and the control sibling get nothing; the placebo arm gets a vague task with no criterion and no recipe.
   if (!t || t.arm === 'none' || t.arm === 'control' || !t.change) return t?.arm === 'placebo' ? PLACEBO_TASK : '';
   return [

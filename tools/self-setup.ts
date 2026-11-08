@@ -122,6 +122,7 @@ await api('PATCH', `/api/boards/${board.id}`, {
     autoProjectOnGold: false,
     wordingGap: F.wordingGap,
     spores: has('--spores'),
+    scrapHeap: focusName === 'evolution', // build 0012: wilted ideas are crossed with the jury's reason as the task
     buildsPerDay: 'builds' in F ? F.builds : 4,
     buildModel: 'opus',
     judgeGuidance: JURY,

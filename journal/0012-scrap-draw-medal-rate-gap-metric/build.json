@@ -1,0 +1,86 @@
+{
+  "seq": 12,
+  "title": "Scrap Draw Medal-Rate Gap Metric",
+  "pitch": "Metric: scrap-medal-rate gap, target ≥ +10 points over normal breeds. Idle autopilot draws a wilted idea (5+ judged children, none above own medal), weighted by keyword distance from the living pool. It crosses it via the existing cross prompt, task = jury failure reason, tagged 'scrap'. One overview card shows survivors, gap, distance and Promote.",
+  "status": "merged",
+  "trigger": "hand",
+  "branch": "build/0012-scrap-draw-medal-rate-gap-metric",
+  "commit": null,
+  "summary": "I built the scrap heap. An idea counts as wilted when it has 5 or more judged children and none scored above its own medal. With the new board setting (Settings → Autopilot) on, every 8 bred ideas, or whenever the autopilot has nothing else to do, it draws one wilted idea by lot, weighted by how unlike the living pool its keywords are. It crosses that idea with the fittest living idea through the ordinary cross prompt, and the task is the jury's own reason for the wilted idea's score. A new Scrap heap card in the overview shows how many wilted ideas are waiting and how many were drawn, the medal rate of scrap children against normal breeds, the gap against the +10-point target, the mean keyword distance and the survivors as links; on the live board 32 wilted ideas are already waiting. The setting is off on the live board until someone ticks it, and the screenshots show only the empty card because a real draw needs a model. I left out Promote, because scrap children already breed like any other idea, and scrap children stay out of the recipe trials; 124 of 124 tests pass (7 new) and the work is committed.",
+  "error": null,
+  "costUsd": 3.09,
+  "sessionId": "966dfa15-f117-4a95-92e8-f04f72f94684",
+  "createdAt": "2026-11-08 16:13:16",
+  "startedAt": "2026-11-08 16:13:16",
+  "finishedAt": "2026-11-08 16:20:48",
+  "jury": {
+    "originality": 4,
+    "feasibility": 4,
+    "impact": 3,
+    "reason": "Reviving wilted ideas with their jury failure reason, crossed with distant keywords, is a fresh, testable mechanism measured against normal breeds; it is under-specified on thresholds and the weighting."
+  },
+  "lineage": [
+    {
+      "kind": "combine",
+      "title": "Scrap Draw Medal-Rate Gap Metric",
+      "pitch": "Metric: scrap-medal-rate gap, target ≥ +10 points over normal breeds. Idle autopilot draws a wilted idea (5+ judged children, none above own medal), weighted by keyword distance from the living pool. It crosses it via the existing cross prompt, task = jury failure reason, tagged 'scrap'. One overview card shows survivors, gap, distance and Promote."
+    },
+    {
+      "kind": "combine",
+      "title": "Scrap Heap Lottery With Control Lineage",
+      "pitch": "At 7 a.m. Mara opens the overview: overnight, a surprise-weighted lottery drew wilted ideas unlike the living pool's keywords, crossed them using jury failure reasons as tasks, and sent children to a separate scrap-only board. Medal rate and keyword distance versus normal breeds are shown; Promote moves winners."
+    },
+    {
+      "kind": "combine",
+      "title": "Raided Scrap Night Shift Digest",
+      "pitch": "Wilted means 5+ judged breeds with none above its own medal. At idle, the autopilot crosses one wilted idea with a distant living one, task = jury failure reason, tagged 'scrap'. A rival attacker rewrites it, the jury rescores, and survivors fill a fixed overview digest card with Promote, which copies them into normal selection."
+    },
+    {
+      "kind": "seed",
+      "title": "Night Shift Scrap Heap Recombiner",
+      "pitch": "An idle-time autopilot mode that crosses only low-scoring or discarded ideas, using the jury's failure reasons as the task. Each morning the overview shows a \"dream digest\" of the best children, with a button to promote them to the main board."
+    },
+    {
+      "kind": "expand",
+      "title": "Dormant Seed Bank Resurrection Lottery",
+      "pitch": "Metric: share of autopilot breeds whose parent was a wilted idea revived by a surprise-weighted lottery that favors the most unlike keyword to the living pool. Measured as novelty (keyword distance) of children. Target: 15% of breeds, +20% mean keyword distance versus the control."
+    },
+    {
+      "kind": "combine",
+      "title": "Compost Night Shift With Soil Digest",
+      "pitch": "When the autopilot is idle or the hour is quiet, it draws one wilted idea (5 seasons without a medal child), picked by keyword distance from living ideas. It crosses it using the jury's failure reason as task, tags the child 'scrap', and a morning digest shows the best scraps with a Promote button next to a scrap-vs-normal medal-rate row."
+    },
+    {
+      "kind": "combine",
+      "title": "Lifespan Raid: Rival Attackers Cull Ideas",
+      "pitch": "Each idea gets a lifespan of N autopilot steps. Each step, a rival board's attacker rewrites one top idea to look gold-worthy; the jury rescores it, and a drop over 2 points is a kill, logged in a table. A kill cuts lifespan; a medal-winning child renews it."
+    },
+    {
+      "kind": "expand",
+      "title": "Orchard Seasons: Senescence and Grafting",
+      "pitch": "Tomas, a board owner, sees ideas as trees: each has 5 autopilot-step seasons, wilts grey when out of them, and a medal-winning child resets it. He can graft a dead idea's keyword onto a living one, which revives it once. Tests included."
+    },
+    {
+      "kind": "combine",
+      "title": "Compost Heap: Wilted Ideas Feed Soil",
+      "pitch": "Like a gardener's compost heap turning dead plants into soil, ideas out of 5 autopilot seasons wilt grey; each step the autopilot draws one wilted idea by keyword distance from living ones, crosses it using its jury reason, tags the child 'scrap', and a medal-rate row compares scrap with normal breeds."
+    },
+    {
+      "kind": "seed",
+      "title": "Ideas age and die: every idea has a lifespan, and only one that has bred a medal-winning child lives on.",
+      "pitch": ""
+    },
+    {
+      "kind": "expand",
+      "title": "Host-Parasite Arms Race Between Boards",
+      "pitch": "Like Red Queen coevolution between hosts and parasites, each board's jury is bred to attack the other's best ideas. Attack prompts that fell a survivor get inherited by later attackers. Overview shows each board's kill rate over time and who currently leads."
+    },
+    {
+      "kind": "combine",
+      "title": "Wilting Ideas Duel Across Boards",
+      "pitch": "An \"Exchange\" button sends board A's top living idea to board B as an attack prompt; B's jury stores a critique. Survivors scoring silver or better are crossed, and each cross resets the season counter of both parents. Ideas out of 5 steps wilt grey."
+    }
+  ],
+  "filmLine": "Before the code to empty it even existed, the scrap heap already held 32 ideas the autopilot kept breeding from without any child ever beating them.",
+  "tests": "✔ sporeRooted and sporeStats: a medal where it landed is a root; children count for arrivals (0.113209ms)\n✔ autopilot: a spore board sends its best idea to the spore board it fits, once, and the guest is judged there (24.59625ms)\n✔ spores off: the autopilot never sends anything (14.7115ms)\n✔ autopilot: an idea that is built or being built never leaves as a spore (10.455792ms)\nℹ tests 124\nℹ suites 0\nℹ pass 124\nℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 5400.8875"
+}

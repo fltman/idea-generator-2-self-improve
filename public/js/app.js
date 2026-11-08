@@ -11,6 +11,7 @@ import {
   diversity, diversitySeries, pressureStats, MONOCULTURE_SHARE, DIVERSITY_WINDOW, netLiftStats, CONTROL_EVERY,
   appliedStatus, appliedStats, APPLIED_STATUSES, duelHit, duelStats, STYLES, STYLE_MIN, styleStats,
   plainGap, styleCarried, wordingStats, PLAIN_GAP, sporeStats, sporeRooted, SPORE_EVERY,
+  wilted, scrapStats, WILT_CHILDREN, SCRAP_EVERY, SCRAP_TARGET, SCRAP_MIN,
 } from './evolve.js';
 
 /** A net lift in medal steps, signed, two decimals: +0.33, −0.50, ±0.00. */
@@ -193,6 +194,10 @@ function onEvent(e) {
         const from = S.boards.find((b) => b.id === e.fromBoardId);
         toast(t('sporeArrived', { b: from?.title ?? '?' }), 'good');
       }
+      break;
+    case 'scrap':
+      toast(t('scrapDrawn', { title: S.ideas.get(e.from)?.title ?? '?' }), 'info');
+      renderPanelSoon();
       break;
     case 'build':
     case 'buildLog':
@@ -658,6 +663,36 @@ function sporeOverview(ideas) {
   );
 }
 
+/**
+ * Overview: the scrap heap (build 0012). Wilted ideas waiting, how many were
+ * drawn, the medal rate of their children against normal breeds and the gap
+ * in points against SCRAP_TARGET, the mean keyword distance of the draws, and
+ * the survivors (scrap children with a medal), each a link to its idea. null
+ * when the scrap heap is off and nothing was ever drawn.
+ */
+function scrapOverview(ideas) {
+  const s = scrapStats(ideas);
+  if (!S.board.config.scrapHeap && !s.drawn) return null;
+  const waiting = wilted(ideas, S.edges ?? []).filter((w) => !ideas.some((i) => i.scrap?.from === w.id)).length;
+  const pct = (r) => (r == null ? '–' : `${Math.round(r * 100)}%`);
+  const gapText = s.gap == null ? '–' : `${s.gap > 0 ? '+' : s.gap < 0 ? '−' : '±'}${Math.abs(s.gap)}`;
+  return h('div', { class: 'evo scrap-overview' },
+    h('span', { class: 'muted', title: t('scrapHint', { n: WILT_CHILDREN, every: SCRAP_EVERY }) }, `♻ ${t('scrapTitle')}`),
+    h('div', {}, t('scrapLine', { waiting, drawn: s.drawn })),
+    h('div', { class: 'applied-cells' },
+      h('span', { class: 'applied-cell' }, t('scrapKids'), ' ', h('b', {}, `${s.scrap.medals}/${s.scrap.n}`), h('span', { class: 'muted' }, ` ${pct(s.scrap.rate)}`)),
+      h('span', { class: 'applied-cell' }, t('scrapNormal'), ' ', h('b', {}, `${s.normal.medals}/${s.normal.n}`), h('span', { class: 'muted' }, ` ${pct(s.normal.rate)}`))),
+    h('div', { class: s.gap == null || s.early ? 'muted' : s.onTarget ? 'lift-hit' : 'lift-miss' },
+      t('scrapGap', { gap: gapText, target: SCRAP_TARGET }),
+      s.gap != null && s.early ? ` · ${t('scrapEarly', { n: SCRAP_MIN })}` : ''),
+    s.distance != null ? h('div', { class: 'muted' }, t('scrapDistance', { d: s.distance.toFixed(2) })) : null,
+    s.survivors.length ? h('div', { class: 'muted' }, t('scrapSurvivors')) : null,
+    s.survivors.length ? h('ul', { class: 'spore-list' }, s.survivors.slice(0, 5).map((i) =>
+      h('li', {}, `${MEDAL_ICON[medal(i)]} `, h('button', { class: 'linkish', onclick: () => graph.h.select(i.id) }, i.title)))) : null,
+    !S.board.config.scrapHeap ? h('small', { class: 'muted' }, t('scrapOff')) : null,
+  );
+}
+
 const DUEL_MARK = { child: '▲', parent: '▼', tie: '=' };
 
 /**
@@ -806,6 +841,12 @@ function renderIdea(idea) {
     idea.kind === 'guest' && idea.originBoardId
       ? h('button', { class: 'linkish', onclick: () => openBoard(idea.originBoardId) }, `${idea.spore ? '🍄' : '↗'} ${t(idea.spore ? 'sporeFrom' : 'fromBoard', { b: idea.originBoardTitle ?? '?' })}`)
       : null,
+    idea.scrap
+      ? h('p', { class: 'small muted', title: t('scrapHint', { n: WILT_CHILDREN, every: SCRAP_EVERY }) }, '♻ ',
+          h('button', { class: 'linkish', onclick: () => graph.h.select(idea.scrap.from) },
+            t('scrapFrom', { title: S.ideas.get(idea.scrap.from)?.title ?? '?' })),
+          idea.scrap.distance != null ? ` · ${t('scrapDistanceOne', { d: idea.scrap.distance.toFixed(2) })}` : '')
+      : null,
     idea.spore ? h('p', { class: 'small muted' }, t(sporeRooted(idea) === true ? 'sporeRootedYes' : sporeRooted(idea) === false ? 'sporeRootedNo' : 'sporeRootedWait')) : null,
     h('h2', {}, idea.title),
     idea.pitch ? h('p', { class: 'pitch' }, idea.pitch) : null,
@@ -927,6 +968,7 @@ function renderOverview() {
             : t('evoShort', { g: stats.generation, best: stats.best })))
       : null,
     diversityOverview(ideas),
+    scrapOverview(ideas),
     liftOverview(ideas),
     styleOverview(ideas),
     sporeOverview(ideas),
@@ -1155,6 +1197,7 @@ async function boardSettingsDialog() {
   const selfOn = h('input', { type: 'checkbox', checked: c.selfImprove });
   const wordingOn = h('input', { type: 'checkbox', checked: !!c.wordingGap });
   const sporesOn = h('input', { type: 'checkbox', checked: !!c.spores });
+  const scrapOn = h('input', { type: 'checkbox', checked: !!c.scrapHeap });
   const buildsPerDay = inp(c.buildsPerDay, { type: 'number', min: 0, max: 50 });
   const buildModel = inp(c.buildModel, { placeholder: 'opus' });
   const xOn = h('input', { type: 'checkbox', checked: c.researchers.x.enabled }), xFocus = inp(c.researchers.x.focus, { placeholder: t('focusPh') });
@@ -1206,7 +1249,8 @@ async function boardSettingsDialog() {
     h('fieldset', {}, h('legend', {}, t('autopilot')),
       field(t('mode'), mode), h('div', { class: 'grid3' }, field(t('pace'), pace), field(t('stepsPerHour'), sph), field(t('usdPerDay'), usd)),
       h('small', { class: 'muted' }, t('rateNote')),
-      h('label', { class: 'check', title: t('sporeHint', { n: SPORE_EVERY }) }, sporesOn, `🍄 ${t('sporesOn')}`)),
+      h('label', { class: 'check', title: t('sporeHint', { n: SPORE_EVERY }) }, sporesOn, `🍄 ${t('sporesOn')}`),
+      h('label', { class: 'check', title: t('scrapHint', { n: WILT_CHILDREN, every: SCRAP_EVERY }) }, scrapOn, `♻ ${t('scrapOn')}`)),
     h('fieldset', {}, h('legend', {}, t('models')), h('small', { class: 'muted' }, t('modelsBoardNote')),
       h('div', { class: 'grid2' }, ROLES.map((r) => field(t(`role_${r}`), models[r])))),
     h('button', {
@@ -1232,7 +1276,7 @@ async function boardSettingsDialog() {
           title: title.value, goal: goal.value,
           config: {
             lang: lang.value, flowName: flowName.value, flow: { system: sys.value, expand: exp.value, combine: comb.value },
-            judgeGuidance: guidance.value, autoProjectOnGold: autoProj.checked, wordingGap: wordingOn.checked, spores: sporesOn.checked,
+            judgeGuidance: guidance.value, autoProjectOnGold: autoProj.checked, wordingGap: wordingOn.checked, spores: sporesOn.checked, scrapHeap: scrapOn.checked,
             selfImprove: selfOn.checked, buildsPerDay: Number(buildsPerDay.value), buildModel: buildModel.value,
             researchers: { x: { enabled: xOn.checked, focus: xFocus.value }, research: { enabled: rOn.checked, focus: rFocus.value } },
             mode: mode.value, autopilotSeconds: Number(pace.value), rate: { stepsPerHour: Number(sph.value), usdPerDay: Number(usd.value) },
