@@ -248,8 +248,14 @@ export function createHandler({ repo, engine, autopilot, runtime, publicDir, bui
         retrying: ideas.filter((i) => engine.retrying.has(i.id)).map((i) => i.id),
         autopilot: autopilot.status(board.id),
         spentToday: repo.spentOn(board.id),
+        recorder: repo.callStats(board.id),
         spores: repo.sporesFrom(board.id).map((g) => ({ id: g.id, originIdeaId: g.originIdeaId, boardId: g.boardId, boardTitle: g.boardTitle, title: g.title, originality: g.originality, feasibility: g.feasibility, impact: g.impact, medalOverride: g.medalOverride })),
       };
+    }],
+    // ---- flight recorder (build 0013): the board's model calls per role, and the restarts
+    ['GET', /^\/api\/boards\/(\d+)\/recorder$/, ([id]) => {
+      if (!repo.getBoard(+id)) throw new AppError(404, 'not_found', 'Board not found');
+      return { recorder: repo.callStats(+id) };
     }],
     // ---- codebase boards: analyse a local folder, then create a board from the picked directions
     ['POST', /^\/api\/repo\/analyze$/, (_p, b) => engine.analyzeRepo(b)],

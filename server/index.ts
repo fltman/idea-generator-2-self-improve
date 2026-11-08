@@ -19,6 +19,9 @@ const HOST = process.env.HOST ?? '127.0.0.1';
 
 mkdirSync(join(root, 'data'), { recursive: true });
 const repo = openDb(process.env.DB_FILE ?? join(root, 'data', 'ideas.db'));
+// Flight recorder (build 0013): model calls the last run left open were cut off by a crash or restart.
+const boot = repo.recordBoot();
+if (boot.lost.length) console.log(`[recorder] ${boot.lost.length} model call(s) were cut off by the last stop.`);
 
 // App settings belong to the browser (localStorage). It pushes them here on
 // load and on every change; they are kept in memory only, never on disk.
@@ -28,7 +31,16 @@ const runtime: Runtime = {
   get: () => settings,
   set: (s) => {
     settings = s;
+    const first = !received;
     received = true;
+    // Redo the cut-off judgements with the models and keys the browser just sent, not the defaults.
+    // Not in a build's worktree or a screenshot (IDEAGEN_NO_AUTOPILOT): there the DB is a copy of the live one,
+    // and its open rows are the live server's calls in flight, not ours to redo. IDEAGEN_RESUME=1 forces it
+    // (the crash test runs with the autopilot off against its own temp database).
+    if (first && boot.lost.length && (process.env.IDEAGEN_NO_AUTOPILOT !== '1' || process.env.IDEAGEN_RESUME === '1')) {
+      const r = engine.recover(boot.lost);
+      console.log(`[recorder] resumed ${r.judged.length} judgement(s) and ${r.retried.length} second opinion(s) after the restart.`);
+    }
   },
   received: () => received,
 };

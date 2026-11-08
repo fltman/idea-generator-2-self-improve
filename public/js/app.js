@@ -11,7 +11,7 @@ import {
   diversity, diversitySeries, pressureStats, MONOCULTURE_SHARE, DIVERSITY_WINDOW, netLiftStats, CONTROL_EVERY,
   appliedStatus, appliedStats, APPLIED_STATUSES, duelHit, duelStats, STYLES, STYLE_MIN, styleStats,
   plainGap, styleCarried, wordingStats, PLAIN_GAP, sporeStats, sporeRooted, SPORE_EVERY,
-  wilted, scrapStats, WILT_CHILDREN, SCRAP_EVERY, SCRAP_TARGET, SCRAP_MIN,
+  wilted, scrapStats, WILT_CHILDREN, SCRAP_EVERY, SCRAP_TARGET, SCRAP_MIN, flightStats,
 } from './evolve.js';
 
 /** A net lift in medal steps, signed, two decimals: +0.33, −0.50, ±0.00. */
@@ -106,6 +106,7 @@ async function openBoard(id) {
   S.autopilot = data.autopilot;
   S.spentToday = data.spentToday;
   S.spores = data.spores ?? [];
+  S.recorder = data.recorder ?? null;
   S.selected = null;
   localStorage.setItem('ideagen.board', String(id));
   graph.setData(data.ideas, data.edges, data.judging);
@@ -137,6 +138,7 @@ function onEvent(e) {
           toast(t('gold', { t: idea.title }), 'good');
         }
       }
+      refreshRecorder();
       renderPanelSoon();
       break;
     case 'edges':
@@ -644,6 +646,51 @@ function styleOverview(ideas) {
   );
 }
 
+/** The flight record changes with every model call: fetch it at most every few seconds while ideas arrive. */
+const refreshRecorder = debounce(() => {
+  const id = S.board?.id;
+  if (!id) return;
+  api('GET', `/api/boards/${id}/recorder`)
+    .then((d) => { if (S.board?.id === id) { S.recorder = d.recorder; renderPanelSoon(); } })
+    .catch(() => {});
+}, 4000);
+
+/**
+ * Overview: the flight recorder (build 0013). Every model call is logged with
+ * its role, dollars and seconds; this shows per role the calls, and dollars
+ * and seconds per medal (all the board's medals), plus a restart chip: server
+ * restarts since the board was made and the calls they cut off (whose
+ * judgements resumed). null before the board's first logged call.
+ */
+function recorderOverview(ideas) {
+  const rec = S.recorder;
+  if (!rec || (!rec.roles?.length && !rec.restarts)) return null;
+  const st = flightStats(rec, ideas);
+  const usd = (x) => (x == null ? '–' : x >= 1 ? `$${x.toFixed(2)}` : `$${x.toFixed(3)}`);
+  const sec = (x) => (x == null ? '–' : x >= 100 ? `${Math.round(x)} s` : `${x.toFixed(1)} s`);
+  const row = (r, total) => h('tr', { class: total ? 'recorder-total' : '' },
+    h('th', {}, total ? t('recorderTotal') : r.role),
+    h('td', {}, String(r.n), r.failed || r.lost
+      ? h('span', { class: 'muted', title: t('recorderFailHint') }, ` (${[r.failed ? `✗${r.failed}` : '', r.lost ? `↯${r.lost}` : ''].filter(Boolean).join(' ')})`)
+      : null),
+    h('td', {}, usd(r.usdPerMedal)),
+    h('td', {}, sec(r.secPerMedal)));
+  return h('div', { class: 'evo recorder-overview' },
+    h('div', { class: 'row space' },
+      h('span', { class: 'muted', title: t('recorderHint') }, `✈ ${t('recorderTitle')}`),
+      h('span', {
+        class: `recorder-chip${st.lost ? ' lost' : ''}`,
+        title: st.lastRestart ? t('recorderLast', { at: st.lastRestart }) : t('recorderNoRestart'),
+      }, `↻ ${t(st.restarts === 1 ? 'recorderRestart1' : 'recorderRestarts', { n: st.restarts })}${st.lost ? ` · ${t(st.lost === 1 ? 'recorderLost1' : 'recorderLost', { n: st.lost })}` : ''}`)),
+    st.rows.length
+      ? h('div', {}, t('recorderLine', { calls: st.total.n, usd: usd(st.total.usd), sec: sec(st.total.seconds), medals: st.medals }))
+      : h('div', { class: 'muted' }, t('recorderEmpty')),
+    !st.rows.length ? null : h('table', { class: 'trial recorder-table' },
+      h('thead', {}, h('tr', {}, h('th', {}, t('recorderRole')), h('th', {}, t('recorderCalls')), h('th', {}, t('recorderUsdPer')), h('th', {}, t('recorderSecPer')))),
+      h('tbody', {}, st.rows.map((r) => row(r, false)), st.rows.length > 1 ? row(st.total, true) : null)),
+  );
+}
+
 /**
  * Overview: spores. Sent from here (where each landed and whether it took root)
  * and taken in (how many rooted and how many children they bred here). null
@@ -967,6 +1014,7 @@ function renderOverview() {
             ? t('evoLine', { g: stats.generation, first: fmt(stats.first), latest: fmt(stats.latest), best: stats.best })
             : t('evoShort', { g: stats.generation, best: stats.best })))
       : null,
+    recorderOverview(ideas),
     diversityOverview(ideas),
     scrapOverview(ideas),
     liftOverview(ideas),

@@ -128,6 +128,29 @@ CREATE TABLE IF NOT EXISTS builds (
   finished_at TEXT
 );
 CREATE INDEX IF NOT EXISTS builds_idea ON builds(idea_id);
+-- Flight recorder (build 0013): one row per model call, opened before the call
+-- and closed after it. A row still 'open' when the server boots was cut off by
+-- a crash or restart; recordBoot() marks it 'lost'. board_id 0 = no board.
+CREATE TABLE IF NOT EXISTS calls (
+  id INTEGER PRIMARY KEY,
+  board_id INTEGER NOT NULL,
+  idea_id INTEGER,
+  role TEXT NOT NULL,
+  model TEXT NOT NULL DEFAULT '',
+  status TEXT NOT NULL DEFAULT 'open',
+  usd REAL NOT NULL DEFAULT 0,
+  ms INTEGER NOT NULL DEFAULT 0,
+  started_at TEXT NOT NULL DEFAULT (datetime('now')),
+  finished_at TEXT
+);
+CREATE INDEX IF NOT EXISTS calls_board ON calls(board_id, role);
+CREATE INDEX IF NOT EXISTS calls_status ON calls(status);
+-- One row per server start; lost = calls the previous run left open.
+CREATE TABLE IF NOT EXISTS boots (
+  id INTEGER PRIMARY KEY,
+  at TEXT NOT NULL DEFAULT (datetime('now')),
+  lost INTEGER NOT NULL DEFAULT 0
+);
 `;
 
 // Templates for a board's creation flow. The prompts are in English; the
@@ -986,6 +1009,70 @@ export function openDb(file: string) {
     spentTotal(): { usd: number; calls: number } {
       const r: any = db.prepare('SELECT SUM(usd) AS usd, SUM(calls) AS calls FROM spend').get();
       return { usd: r?.usd ?? 0, calls: r?.calls ?? 0 };
+    },
+
+    // ---- flight recorder (build 0013): every model call, opened before and closed after
+    openCall(c: { boardId: number; ideaId?: number | null; role: string; model?: string }): number {
+      const r = db.prepare('INSERT INTO calls (board_id, idea_id, role, model) VALUES (?, ?, ?, ?)')
+        .run(c.boardId, c.ideaId ?? null, c.role, c.model ?? '');
+      return Number(r.lastInsertRowid);
+    },
+    closeCall(id: number, status: 'ok' | 'failed', usd: number, ms: number) {
+      db.prepare("UPDATE calls SET status = ?, usd = ?, ms = ?, finished_at = datetime('now') WHERE id = ? AND status = 'open'")
+        .run(status, usd > 0 ? usd : 0, Math.max(0, Math.round(ms)), id);
+    },
+    /**
+     * A server start: every call the previous run left open was cut off (crash,
+     * kill, restart). They become 'lost' and a boots row records how many, in one
+     * transaction. Returns the lost calls so the engine can redo their work.
+     */
+    recordBoot(): { id: number; lost: { id: number; boardId: number; ideaId: number | null; role: string }[] } {
+      db.exec('BEGIN');
+      try {
+        const open = (db.prepare("SELECT id, board_id, idea_id, role FROM calls WHERE status = 'open'").all() as any[])
+          .map((r) => ({ id: r.id, boardId: r.board_id, ideaId: r.idea_id, role: r.role }));
+        db.prepare("UPDATE calls SET status = 'lost', finished_at = datetime('now') WHERE status = 'open'").run();
+        const id = Number(db.prepare('INSERT INTO boots (lost) VALUES (?)').run(open.length).lastInsertRowid);
+        db.exec('COMMIT');
+        return { id, lost: open };
+      } catch (e) {
+        db.exec('ROLLBACK');
+        throw e;
+      }
+    },
+    /** The calls for one idea (oldest first): what the crash test reads. */
+    callsFor(ideaId: number): { id: number; role: string; status: string; usd: number; ms: number }[] {
+      return (db.prepare('SELECT id, role, status, usd, ms FROM calls WHERE idea_id = ? ORDER BY id').all(ideaId) as any[])
+        .map((r) => ({ id: r.id, role: r.role, status: r.status, usd: r.usd, ms: r.ms }));
+    },
+    /**
+     * A board's flight record: per role the calls, failures, lost calls, dollars
+     * and seconds; and the server restarts since the board was created, with the
+     * calls they cut off on this board.
+     */
+    callStats(boardId: number) {
+      const roles = (db.prepare(
+        `SELECT role, COUNT(*) AS n, SUM(status = 'failed') AS failed, SUM(status = 'lost') AS lost,
+                SUM(usd) AS usd, SUM(ms) AS ms
+         FROM calls WHERE board_id = ? GROUP BY role ORDER BY SUM(usd) DESC, COUNT(*) DESC`,
+      ).all(boardId) as any[]).map((r) => ({
+        role: r.role, n: r.n, failed: r.failed ?? 0, lost: r.lost ?? 0,
+        usd: Math.round((r.usd ?? 0) * 10000) / 10000, seconds: Math.round((r.ms ?? 0) / 100) / 10,
+      }));
+      const board: any = db.prepare('SELECT created_at FROM boards WHERE id = ?').get(boardId);
+      const boots = board
+        // strictly after: the boot the board was made under (same second at the latest) is not a restart
+        ? (db.prepare('SELECT at, lost FROM boots WHERE at > ? ORDER BY id').all(board.created_at) as any[])
+        : [];
+      const lostHere: any = db.prepare("SELECT COUNT(*) AS n FROM calls WHERE board_id = ? AND status = 'lost'").get(boardId);
+      const first: any = db.prepare('SELECT MIN(started_at) AS at FROM calls WHERE board_id = ?').get(boardId);
+      return {
+        roles,
+        restarts: boots.length,
+        lastRestart: boots.length ? boots[boots.length - 1].at : null,
+        lost: lostHere?.n ?? 0,
+        since: first?.at ?? null,
+      };
     },
   };
   return repo;
