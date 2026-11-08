@@ -591,6 +591,15 @@ export function wordingStats(ideas) {
 export const SPORE_EVERY = 10;
 /** The lowest medal a spore may carry (2 = silver). */
 export const SPORE_MIN_MEDAL = 2;
+/** At most one spore per board per this many ms, so the board that breeds fastest cannot flood the others. */
+export const SPORE_GAP_MS = 60 * 60 * 1000;
+
+/** Has the board rested long enough since its last spore left? `lastAt`: that guest's created_at (UTC, SQLite format) or null. */
+export function sporeRested(lastAt, now = Date.now(), gapMs = SPORE_GAP_MS) {
+  if (!lastAt) return true;
+  const t = Date.parse(String(lastAt).replace(' ', 'T') + (/[zZ]|[+-]\d\d:?\d\d$/.test(lastAt) ? '' : 'Z'));
+  return !Number.isFinite(t) || now - t >= gapMs;
+}
 
 /** Is the board due to release a spore? `lastSporeAt`: id of the newest home idea when the last spore left (0: never). */
 export function sporeDue(ideas, lastSporeAt = 0) {
@@ -784,7 +793,10 @@ export function scrapStats(ideas) {
  * board has none yet. Measured, never used: nothing in selection reads it.
  */
 export function flightStats(recorder, ideas) {
-  const medals = ideas.filter((i) => (medal(i) ?? 0) >= 1).length;
+  // Only medals won while the recorder was running: calls logged since `since`
+  // divided by every medal the board ever won would understate the cost.
+  const since = recorder?.since ?? null;
+  const medals = ideas.filter((i) => (medal(i) ?? 0) >= 1 && (!since || (i.judgedAt && i.judgedAt >= since))).length;
   const per = (x) => (medals ? x / medals : null);
   const rows = (recorder?.roles ?? []).map((r) => ({ ...r, usdPerMedal: per(r.usd), secPerMedal: per(r.seconds) }));
   const sum = (k) => rows.reduce((s, r) => s + (r[k] ?? 0), 0);

@@ -202,3 +202,12 @@ test('kill -9 mid-judgement, restart: one idea row, the cut-off call recorded as
   assert.equal(ideaRows.length, 1);
   assert.deepEqual(repo.callsFor(ideaRows[0].id).map((c) => `${c.role}:${c.status}`), ['judge:lost', 'judge:ok'], 'exactly one finished judge call');
 });
+
+test('flightStats: only medals won since the recorder started count', () => {
+  const rec = { roles: [{ role: 'judge', n: 2, failed: 0, lost: 0, usd: 1, seconds: 10 }], since: '2026-11-08 16:00:00' };
+  const old = { originality: 4, feasibility: 3, impact: 3, medalOverride: null, judgedAt: '2026-11-08 15:00:00' };
+  const fresh = { ...old, judgedAt: '2026-11-08 16:30:00' };
+  const s = flightStats(rec, [old, old, fresh]);
+  assert.equal(s.medals, 1);
+  assert.equal(s.rows[0].usdPerMedal, 1);
+});

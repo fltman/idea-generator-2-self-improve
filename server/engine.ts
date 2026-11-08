@@ -14,7 +14,7 @@ import { slugify, writeBrief, writeProject } from './project.ts';
 import { RepoError, scanRepo, scanText, shortPath } from './reposcan.ts';
 import { ProviderError, type AppSettings, type ChatFn, type Role } from './providers.ts';
 import { fitness, isJudged, medal, scoreSum, onMedalEdge, goldGate } from '../public/js/score.js';
-import { nextMove, assignArm, liftStats, armOf, controlDue, drawStyle, sporeDue, pickSpore, sporeTarget, scrapDue, drawScrap } from '../public/js/evolve.js';
+import { nextMove, assignArm, liftStats, armOf, controlDue, drawStyle, sporeDue, sporeRested, pickSpore, sporeTarget, scrapDue, drawScrap } from '../public/js/evolve.js';
 
 export class AppError extends Error {
   status: number;
@@ -91,6 +91,8 @@ type Deps = {
   styleRng?: () => number;
   /** Spores: the draw that breaks ties between equally fitting target boards (tests fix it). */
   sporeRng?: () => number;
+  /** Clock for the spore gap (tests move it). */
+  now?: () => number;
   /** Scrap heap: the lot that picks which wilted idea is drawn (tests fix it). */
   scrapRng?: () => number;
   /** Codebase boards: the folder gold logs go to unless a board names its own file (default data/gold). */
@@ -107,6 +109,7 @@ export function createEngine(deps: Deps) {
   const duelRng = deps.duelRng ?? Math.random;
   const styleRng = deps.styleRng ?? Math.random;
   const sporeRng = deps.sporeRng ?? Math.random;
+  const now = deps.now ?? Date.now;
   const scrapRng = deps.scrapRng ?? Math.random;
   const bus = createBus();
   const judging = new Set<number>();
@@ -168,6 +171,7 @@ export function createEngine(deps: Deps) {
     const out = repo.sporesFrom(boardId);
     const ideas = repo.listIdeas(boardId);
     if (!sporeDue(ideas, out.reduce((m, g) => Math.max(m, g.id), 0))) return null;
+    if (!sporeRested(out.at(-1)?.createdAt ?? null, now())) return null;
     // Never send an idea twice, nor one that is built or being built: it would only
     // propose the same change again on the board it lands on.
     const BUILT = new Set(['queued', 'running', 'ready', 'merged']);
