@@ -1,0 +1,36 @@
+{
+  "seq": 10,
+  "title": "Style Column With Medal Rate Table",
+  "pitch": "Add a `style` column and a fixed list (scenario, mechanism, analogy, metric). Each breed draws one by lot, the prompt demands it, and the overview shows medal rate per style with n and a 'too early' mark under 10 children.",
+  "status": "merged",
+  "trigger": "hand",
+  "branch": "build/0010-style-column-with-medal-rate-table",
+  "commit": null,
+  "summary": "Every breed (expand or cross) now draws one of four styles by lot (scenario, mechanism, analogy, metric). The prompt demands it and the idea stores it in a new `style` column. The idea panel shows a ✎ style tag, and the board overview has a 'Style by lot, medal rate' table: per style n, medals/n with %, golds, and 'too early' under 10 judged children. Styles are measured only, never used in selection, and use their own rng so existing draws are unchanged. 101 tests pass. The after screenshots stage the styles in the browser because no live idea has one yet.",
+  "error": null,
+  "costUsd": 2.03,
+  "sessionId": "2380aab0-e63a-4aba-80c7-231b2b0b949a",
+  "createdAt": "2026-11-08 13:24:42",
+  "startedAt": "2026-11-08 13:24:42",
+  "finishedAt": "2026-11-08 13:30:17",
+  "jury": {
+    "originality": 3,
+    "feasibility": 5,
+    "impact": 3,
+    "reason": "Randomly assigned idea styles give a clean, testable experiment on which framing earns medals, but it is a modest variation on the existing placebo and lot-draw machinery."
+  },
+  "lineage": [
+    {
+      "kind": "expand",
+      "title": "Four Styles Drawn By Lot",
+      "pitch": "Smallest change: a fixed list of four styles (scenario, mechanism, analogy, metric). Each breed draws one by lot, the prompt demands it, and it's stored in a new style column. The overview shows medal rate per style with n."
+    },
+    {
+      "kind": "seed",
+      "title": "The breeder writes ideas in a few distinct styles and learns which style earns medals on this board.",
+      "pitch": ""
+    }
+  ],
+  "filmLine": "The app began writing its ideas in four different voices, chosen by lot, and set up a table to learn which voice the jury rewards. Since no idea had a voice yet, its first picture of that table had to be staged.",
+  "tests": "✔ diversity pressure: in a monoculture every breed takes a parent from outside the theme, still by score (3.881792ms)\n✔ diversity pressure: no monoculture, or nothing outside it, breeds as before (0.457083ms)\n✔ diversity gauge: the series over time, when the monoculture began, and what the pressure did (0.358583ms)\n✔ idea styles: the lot is uniform over four styles, and styleStats counts medals per style with a too-early mark (0.492709ms)\nℹ tests 101\nℹ suites 0\nℹ pass 101\nℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 5227.2505"
+}

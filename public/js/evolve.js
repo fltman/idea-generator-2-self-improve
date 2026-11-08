@@ -479,3 +479,43 @@ export function evolutionStats(ideas, window = 8) {
     best: bred.length ? Math.max(...bred.map(fitness)) : null,
   };
 }
+
+// ---------------------------------------------------------------- idea styles
+//
+// Which framing earns medals? Every breed (expand or cross) draws one of four
+// writing styles by lot, the prompt demands it, and the child remembers it.
+// The draw is independent of the trial arm and of the parents, so the medal
+// rate per style is a clean comparison. Styles are measured, never used to
+// steer breeding.
+
+export const STYLES = ['scenario', 'mechanism', 'analogy', 'metric'];
+/** Fewer judged children than this in a style, and its row says "too early". */
+export const STYLE_MIN = 10;
+
+/** One style by lot (uniform). */
+export function drawStyle(rng = Math.random) {
+  return STYLES[Math.min(STYLES.length - 1, Math.floor(rng() * STYLES.length))];
+}
+
+/**
+ * Per style: judged children, how many earned a medal (bronze or better) and
+ * how many gold, and whether there are too few to read yet. Unknown styles and
+ * unjudged ideas are skipped.
+ * @returns {Record<string, {n:number, medals:number, golds:number, rate:number|null, early:boolean}>}
+ */
+export function styleStats(ideas) {
+  const out = Object.fromEntries(STYLES.map((s) => [s, { n: 0, medals: 0, golds: 0, rate: null, early: true }]));
+  for (const i of ideas) {
+    const c = out[i?.style];
+    const m = medal(i);
+    if (!c || m == null) continue;
+    c.n++;
+    if (m >= 1) c.medals++;
+    if (m >= 3) c.golds++;
+  }
+  for (const c of Object.values(out)) {
+    c.rate = c.n ? c.medals / c.n : null;
+    c.early = c.n < STYLE_MIN;
+  }
+  return out;
+}

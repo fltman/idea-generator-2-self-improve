@@ -35,6 +35,20 @@ function liftTaskText(t: LiftTask | null | undefined, many = false) {
   ].join('\n');
 }
 
+/** Idea styles (build 0010): the framing a bred idea must be written in, drawn by lot per breed. */
+export const STYLE_TEXT: Record<string, string> = {
+  scenario: 'a scenario: open with one concrete moment where a specific person uses it, and what changes for them',
+  mechanism: 'a mechanism: say how it works, the parts and the one step that makes it run',
+  analogy: 'an analogy: borrow something that already works in another field and say what it maps to here',
+  metric: 'a metric: name the number it moves, how that number is measured, and a target',
+};
+
+/** The style line for a breed. Format only: no criterion and no recipe, so it can sit beside any trial arm. */
+export function styleText(style: string | null | undefined, many = false) {
+  const s = style ? STYLE_TEXT[style] : null;
+  return s ? `Style: write ${many ? 'every new idea' : 'the new idea'} as ${s}.` : '';
+}
+
 /** One canonical form so "Public Spaces" and "public space" count as one trend. */
 export function normalizeKeywords(raw: unknown): string[] {
   const out: string[] = [];
@@ -257,11 +271,12 @@ export function makeLLM(chat: ChatFn) {
   });
 
   return {
-    async expand(a: { model: string; flow: Flow; board: BoardCtx; idea: Pitch; existingTitles: string[]; lang: Lang; task?: LiftTask | null }) {
+    async expand(a: { model: string; flow: Flow; board: BoardCtx; idea: Pitch; existingTitles: string[]; lang: Lang; task?: LiftTask | null; style?: string | null }) {
       const user = [
         a.flow.expand,
         `The concept:\n${fmtIdea(a.idea)}`,
         liftTaskText(a.task, true),
+        styleText(a.style, true),
         context(a.board, a.existingTitles),
         languageRule(a.lang, a.board.fixedLang),
       ]
@@ -273,12 +288,13 @@ export function makeLLM(chat: ChatFn) {
       return { ideas: ideas.slice(0, 3), costUsd };
     },
 
-    async combine(a: { model: string; flow: Flow; board: BoardCtx; a: Pitch; b: Pitch; existingTitles: string[]; lang: Lang; task?: LiftTask | null }) {
+    async combine(a: { model: string; flow: Flow; board: BoardCtx; a: Pitch; b: Pitch; existingTitles: string[]; lang: Lang; task?: LiftTask | null; style?: string | null }) {
       const user = [
         a.flow.combine,
         `Idea 1:\n${fmtIdea(a.a)}`,
         `Idea 2:\n${fmtIdea(a.b)}`,
         liftTaskText(a.task),
+        styleText(a.style),
         context(a.board, a.existingTitles),
         languageRule(a.lang, a.board.fixedLang),
       ]

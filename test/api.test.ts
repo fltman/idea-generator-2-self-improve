@@ -22,6 +22,7 @@ let liftCheckFails = false; // the recipe check's provider call throws
 let duelAnswer: Record<string, string> | null = null; // the blind duel's A/B/tie picks; null: no valid picks (no duel)
 let duelFails = false; // the duel's provider call throws
 let duelCoin = 0.9; // the engine's duel coin: below 0.5 shows the child as A
+let styleLot = 0; // idea styles: the engine's style lot (0: scenario, 0.99: metric)
 let failNext: Error | null = null;
 let xCitations: string[] = [];
 
@@ -70,7 +71,7 @@ const pages: Record<string, { title: string; text: string }> = {
   'https://example.com/tom': { title: '', text: 'kort' },
 };
 const engine = createEngine({
-  repo, chat: fakeChat, settings: () => settings, gitInit: false, trialRng: () => trialLot, duelRng: () => duelCoin,
+  repo, chat: fakeChat, settings: () => settings, gitInit: false, trialRng: () => trialLot, duelRng: () => duelCoin, styleRng: () => styleLot,
   fetchPage: async (url) => {
     if (!pages[url]) throw new Error('HTTP 404');
     return pages[url];
@@ -707,6 +708,38 @@ test('lift recipes: an old database gets the new columns', async () => {
   const e = r.insertIdea({ boardId: b.id, title: 'E', pitch: '', kind: 'expand', x: 0, y: 0, generation: 1, escape: 'lift recipe' }, [i.id]);
   assert.equal(r.getIdea(e.id)!.escape, 'lift recipe', 'the escape column was added too');
   assert.equal(got.escape, null);
+  const st = r.insertIdea({ boardId: b.id, title: 'S', pitch: '', kind: 'expand', x: 0, y: 0, generation: 1, style: 'analogy' }, [i.id]);
+  assert.equal(r.getIdea(st.id)!.style, 'analogy', 'the style column was added too');
+  assert.equal(got.style, null);
+});
+
+test('idea styles: each breed draws a style by lot, the prompt demands it, and the child stores it', async () => {
+  const { STYLES, styleStats } = await import('../public/js/evolve.js');
+  const { STYLE_TEXT } = await import('../server/llm.ts');
+  const board = await newBoard();
+  const s = await seed(board.id, 'Stilprov');
+  await engine.idle();
+  assert.equal(repo.getIdea(s.id)!.style, null, 'a seed has no style');
+  assert.doesNotMatch(lastCall('judgement').user, /Style:/, 'the jury never sees the style');
+
+  styleLot = 0.6; // third of four: analogy
+  const { data } = await api('POST', `/api/ideas/${s.id}/expand`, {});
+  const user = lastCall('expand').user;
+  assert.ok(user.includes(`Style: write every new idea as ${STYLE_TEXT.analogy}.`));
+  for (const i of data.ideas) assert.equal(repo.getIdea(i.id)!.style, 'analogy', 'one style per breed');
+
+  styleLot = 0.99; // last: metric
+  const { data: c } = await api('POST', `/api/boards/${board.id}/combine`, { a: data.ideas[0].id, b: data.ideas[1].id });
+  assert.ok(lastCall('combine').user.includes(`Style: write the new idea as ${STYLE_TEXT.metric}.`));
+  assert.equal(repo.getIdea(c.idea.id)!.style, 'metric');
+  assert.equal(c.idea.style, 'metric', 'the API returns it');
+  await engine.idle();
+  const stats = styleStats(repo.listIdeas(board.id));
+  assert.equal(stats.analogy.n, 3);
+  assert.equal(stats.metric.n, 1);
+  assert.equal(stats.metric.early, true);
+  assert.deepEqual(Object.keys(stats), STYLES);
+  styleLot = 0;
 });
 
 test('second opinion: an edge verdict on a self-improvement board is re-scored blind by the retrial model', async () => {
