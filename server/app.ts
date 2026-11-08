@@ -245,6 +245,7 @@ export function createHandler({ repo, engine, autopilot, runtime, publicDir, bui
         leads: repo.listLeads(board.id),
         spinoffs: repo.spinoffs(board.id),
         judging: ideas.filter((i) => engine.judging.has(i.id)).map((i) => i.id),
+        retrying: ideas.filter((i) => engine.retrying.has(i.id)).map((i) => i.id),
         autopilot: autopilot.status(board.id),
         spentToday: repo.spentOn(board.id),
       };
@@ -278,6 +279,7 @@ export function createHandler({ repo, engine, autopilot, runtime, publicDir, bui
     ['POST', /^\/api\/ideas\/(\d+)\/expand$/, ([id]) => engine.expand(+id)],
     ['POST', /^\/api\/boards\/(\d+)\/combine$/, ([id], b) => engine.combine(+id, b.a, b.b)],
     ['POST', /^\/api\/ideas\/(\d+)\/judge$/, ([id]) => engine.judge(+id)],
+    ['POST', /^\/api\/ideas\/(\d+)\/retrial$/, ([id]) => engine.retrial(+id)],
     ['PATCH', /^\/api\/ideas\/(\d+)$/, ([id], b) => {
       if (!('medalOverride' in b)) throw new AppError(400, 'bad_request', 'Nothing to change');
       return engine.setMedal(+id, b.medalOverride);

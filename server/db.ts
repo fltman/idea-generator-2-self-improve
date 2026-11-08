@@ -48,6 +48,7 @@ CREATE TABLE IF NOT EXISTS ideas (
   lift_type TEXT,
   lift_from INTEGER REFERENCES ideas(id) ON DELETE SET NULL,
   lift_base INTEGER,
+  retrial TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS ideas_board ON ideas(board_id);
@@ -173,7 +174,7 @@ export const DEFAULT_TEMPLATES = [
 ];
 
 export type Flow = { system: string; expand: string; combine: string };
-const MODEL_ROLES = ['distill', 'expand', 'combine', 'judge', 'summary', 'research', 'x', 'brief'] as const;
+const MODEL_ROLES = ['distill', 'expand', 'combine', 'judge', 'summary', 'research', 'x', 'brief', 'retrial'] as const;
 
 export type BoardConfig = {
   flowName: string;
@@ -298,8 +299,11 @@ export type Idea = {
   liftType: string | null;
   liftFrom: number | null;
   liftBase: number | null;
+  /** A blind second judge's scores (verdicts on a medal edge), on another model. Cleared when the jury re-judges. */
+  retrial: Retrial | null;
   createdAt: string;
 };
+export type Retrial = { originality: number; feasibility: number; impact: number; reason: string; model: string; at: string };
 
 export type Board = {
   id: number; title: string; goal: string; config: BoardConfig; createdAt: string; updatedAt: string;
@@ -370,6 +374,7 @@ const ideaFromRow = (r: any): Idea => ({
   liftType: r.lift_type ?? null,
   liftFrom: r.lift_from ?? null,
   liftBase: r.lift_base ?? null,
+  retrial: r.retrial ? parseJson(r.retrial) : null,
   createdAt: r.created_at,
 });
 
@@ -418,7 +423,7 @@ export function openDb(file: string) {
   db.exec(SCHEMA);
   // Databases from before lift recipes: add the columns (SQLite has no ADD COLUMN IF NOT EXISTS).
   const ideaCols = new Set((db.prepare('PRAGMA table_info(ideas)').all() as any[]).map((c) => c.name));
-  for (const [name, type] of [['recipe_type', 'TEXT'], ['recipe', 'TEXT'], ['lift_type', 'TEXT'], ['lift_from', 'INTEGER'], ['lift_base', 'INTEGER']]) {
+  for (const [name, type] of [['recipe_type', 'TEXT'], ['recipe', 'TEXT'], ['lift_type', 'TEXT'], ['lift_from', 'INTEGER'], ['lift_base', 'INTEGER'], ['retrial', 'TEXT']]) {
     if (!ideaCols.has(name)) db.exec(`ALTER TABLE ideas ADD COLUMN ${name} ${type}`);
   }
 
@@ -542,8 +547,13 @@ export function openDb(file: string) {
     },
     saveJudgement(id: number, j: { originality: number; feasibility: number; impact: number; reason: string; liftType?: string | null; lift?: string | null }) {
       db.prepare(
-        `UPDATE ideas SET originality = ?, feasibility = ?, impact = ?, reason = ?, recipe_type = ?, recipe = ?, judged_at = datetime('now') WHERE id = ?`,
+        // A new verdict makes the old second opinion meaningless: it was about other scores.
+        `UPDATE ideas SET originality = ?, feasibility = ?, impact = ?, reason = ?, recipe_type = ?, recipe = ?, retrial = NULL, judged_at = datetime('now') WHERE id = ?`,
       ).run(j.originality, j.feasibility, j.impact, j.reason, j.liftType ?? null, j.lift ?? null, id);
+      return repo.getIdea(id);
+    },
+    saveRetrial(id: number, r: Retrial) {
+      db.prepare('UPDATE ideas SET retrial = ? WHERE id = ?').run(JSON.stringify(r), id);
       return repo.getIdea(id);
     },
     setKeywords(id: number, keywords: string[]) {

@@ -11,7 +11,7 @@ import { asUrl, fetchPage as realFetchPage } from './extract.ts';
 import { fetchPapers as realFetchPapers, researchLeads, xLeads } from './leads.ts';
 import { writeBrief, writeProject } from './project.ts';
 import { ProviderError, type AppSettings, type ChatFn, type Role } from './providers.ts';
-import { fitness, isJudged, medal, scoreSum } from '../public/js/score.js';
+import { fitness, isJudged, medal, scoreSum, onMedalEdge } from '../public/js/score.js';
 import { nextMove, recipeOf, pickRecipe, liftStats } from '../public/js/evolve.js';
 
 export class AppError extends Error {
@@ -179,9 +179,66 @@ export function createEngine(deps: Deps) {
         }
       }
       emitIdeas(board.id, [out.idea]);
+      // A verdict one point from another medal gets a blind second opinion, in the background.
+      if (autoRetrial(board, out.idea)) queueRetrial(out.idea.id);
       return out;
     } finally {
       setJudging(board.id, [idea.id], false);
+    }
+  }
+
+  // ---------------------------------------------------------------- second opinion
+
+  /**
+   * On self-improvement boards (where a verdict decides what gets built), a
+   * jury score exactly on a medal threshold is re-scored by a second judge on
+   * another model. It runs the same judge prompt and never sees the first
+   * verdict, so it is blind. If both roles use the same model it is skipped:
+   * the point is a second view, not the same view twice.
+   */
+  const autoRetrial = (board: Board, idea: Idea) =>
+    board.config.selfImprove && onMedalEdge(idea) && modelFor(board, 'retrial') !== modelFor(board, 'judge');
+
+  const retrying = new Set<number>();
+  const retrials = new Set<Promise<unknown>>();
+  function queueRetrial(id: number) {
+    if (retrying.has(id)) return;
+    const p = retrial(id)
+      .catch((e: any) => {
+        const boardId = repo.getIdea(id)?.boardId;
+        if (boardId) bus.emit(boardId, { type: 'error', code: e?.code ?? 'retrial_failed', message: e?.message ?? String(e), ideaId: id });
+      })
+      .finally(() => retrials.delete(p));
+    retrials.add(p);
+  }
+
+  async function retrial(ideaId: number) {
+    const idea = mustIdea(ideaId);
+    if (!isJudged(idea)) throw new AppError(400, 'not_judged', 'The jury has not judged this idea yet');
+    if (retrying.has(idea.id)) throw new AppError(409, 'busy', 'A second opinion is already on its way');
+    const board = mustBoard(idea.boardId);
+    const model = modelFor(board, 'retrial');
+    const verdict = (i: Idea | null | undefined) => (i ? [i.judgedAt, i.originality, i.feasibility, i.impact, i.reason].join('|') : '');
+    const judgedAt = verdict(idea);
+    retrying.add(idea.id);
+    bus.emit(board.id, { type: 'retrying', ids: [idea.id], on: true });
+    try {
+      const { judgement: j } = await call(board.id, () =>
+        llm.judge({
+          model, board: ctxOf(board), idea, lang: board.config.lang,
+          guidance: guidanceFor(board), vocabulary: repo.keywordVocabulary(),
+        }),
+      );
+      // The jury re-judged meanwhile: this opinion is about scores that no longer exist.
+      if (verdict(repo.getIdea(idea.id)) !== judgedAt) return { idea: repo.getIdea(idea.id)!, stale: true };
+      const saved = repo.saveRetrial(idea.id, {
+        originality: j.originality, feasibility: j.feasibility, impact: j.impact, reason: j.reason, model, at: new Date().toISOString(),
+      })!;
+      emitIdeas(board.id, [saved]);
+      return { idea: saved };
+    } finally {
+      retrying.delete(idea.id);
+      bus.emit(board.id, { type: 'retrying', ids: [idea.id], on: false });
     }
   }
 
@@ -212,8 +269,13 @@ export function createEngine(deps: Deps) {
     for (const id of ids) if (!judging.has(id) && !queue.includes(id)) queue.push(id);
     pump();
   }
-  /** Resolves when no judgement is queued or running (tests, shutdown). */
-  const idle = () => (active || queue.length ? new Promise<void>((r) => idleWaiters.push(r)) : Promise.resolve());
+  /** Resolves when no judgement or second opinion is queued or running (tests, shutdown). */
+  const idle = async (): Promise<void> => {
+    while (active || queue.length || retrials.size) {
+      if (active || queue.length) await new Promise<void>((r) => idleWaiters.push(r));
+      else await Promise.all([...retrials]);
+    }
+  };
 
   // ---------------------------------------------------------------- creating ideas
 
@@ -317,6 +379,9 @@ export function createEngine(deps: Deps) {
     },
 
     judge,
+    retrying,
+    /** A second opinion by hand (any judged idea, any board): awaited, unlike the automatic one. */
+    retrial,
     createProject: (ideaId: number) => createProject(mustIdea(ideaId)),
 
     reveal(ideaId: number) {

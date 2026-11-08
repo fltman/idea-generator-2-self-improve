@@ -146,6 +146,23 @@ main { display: flex; min-height: 0; }
 .lift-task .linkish { text-align: left; }
 .lift-hit { color: #5fd38d; }
 .lift-miss { color: #e58a7a; }
+.doubt { margin: 0 0 12px; padding: 10px 12px; border-radius: var(--radius); border: 1px solid var(--line); font-size: 12px; }
+.doubt.disagree { border-color: rgba(229,138,122,.55); }
+.doubt.agree { border-color: rgba(95,211,141,.45); }
+.doubt p { margin: 4px 0 8px; }
+.doubt-head { font-weight: 600; color: var(--text); cursor: help; margin-bottom: 6px; }
+.band { margin: 6px 0 4px; }
+.band-track { position: relative; height: 12px; border-radius: 6px; background: var(--accent-track); }
+.band-edge { position: absolute; top: -3px; bottom: -3px; width: 1px; background: var(--muted); opacity: .7; }
+.band-fill { position: absolute; top: 0; bottom: 0; border-radius: 6px; background: rgba(245,197,66,.35); }
+.band-mark { position: absolute; top: 1px; width: 10px; height: 10px; margin-left: -5px; border-radius: 50%; border: 2px solid var(--surface-2); }
+.band-mark.first, .band-key.first { background: var(--accent); }
+.band-mark.second, .band-key.second { background: #e5a85f; }
+.band-key { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 4px; }
+.band-scale { display: flex; justify-content: space-between; font-size: 10px; margin-top: 2px; }
+.doubt-line { margin: 4px 0; }
+.doubt-verdict { font-weight: 600; margin: 4px 0; }
+.doubt .judging { margin: 6px 0 0; }
 .judging { display: flex; gap: 10px; align-items: center; margin: 12px 0; color: var(--gold); }
 .spinner { width: 14px; height: 14px; border: 2px solid rgba(245,197,66,.3); border-top-color: var(--gold); border-radius: 50%; animation: spin .8s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }

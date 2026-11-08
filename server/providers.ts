@@ -14,8 +14,8 @@ import { tmpdir } from 'node:os';
 import Anthropic from '@anthropic-ai/sdk';
 
 export type ProviderId = 'claudecode' | 'openrouter' | 'anthropic' | 'openai' | 'azure' | 'ollama' | 'mlx' | 'lmstudio' | 'custom';
-export type Role = 'distill' | 'expand' | 'combine' | 'judge' | 'summary' | 'research' | 'x' | 'brief';
-export const ROLES: Role[] = ['distill', 'expand', 'combine', 'judge', 'summary', 'research', 'x', 'brief'];
+export type Role = 'distill' | 'expand' | 'combine' | 'judge' | 'summary' | 'research' | 'x' | 'brief' | 'retrial';
+export const ROLES: Role[] = ['distill', 'expand', 'combine', 'judge', 'summary', 'research', 'x', 'brief', 'retrial'];
 
 export type AppSettings = {
   keys: Partial<Record<ProviderId, string>>;
@@ -40,7 +40,8 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
     custom: '',
   },
   // Sonnet: calibrated judge (run `npm run calibrate -- --model claudecode:sonnet` after changes).
-  models: { distill: SONNET, expand: SONNET, combine: SONNET, judge: SONNET, summary: SONNET, research: SONNET, x: 'openrouter:x-ai/grok-4.3', brief: SONNET },
+  // retrial: the blind second judge for verdicts on a medal edge. A different model from the judge on purpose.
+  models: { distill: SONNET, expand: SONNET, combine: SONNET, judge: SONNET, summary: SONNET, research: SONNET, x: 'openrouter:x-ai/grok-4.3', brief: SONNET, retrial: 'claudecode:opus' },
   projectsRoot: '~/Projekt/idea-projects',
   maxUsdPerDay: 5,
 };

@@ -5,7 +5,7 @@
 // instead, expanding a strong idea that has not been expanded yet, which
 // brings new material into the pool.
 
-import { fitness, medal, CRITERIA } from './score.js';
+import { fitness, medal, CRITERIA, confidenceBand } from './score.js';
 
 export const pairKey = (a, b) => (a < b ? `${a}-${b}` : `${b}-${a}`);
 
@@ -94,10 +94,23 @@ export function pickRecipe(a, b, stats) {
  * What the tournament compares: fitness plus a nudge from the hit rate of the
  * idea's own recipe type. The nudge stays within ±0.5, so it never beats a
  * full point of jury score; it decides between ideas the jury scored the same.
+ * A disagreeing second judge then takes off half the gap (doubtPenalty).
  */
 export function breedScore(idea, stats) {
   const r = recipeOf(idea);
-  return fitness(idea) + (r ? liftRate(stats, r.type) - 0.5 : 0);
+  return fitness(idea) + (r ? liftRate(stats, r.type) - 0.5 : 0) - doubtPenalty(idea);
+}
+
+/**
+ * When a blind second judge disagreed with the jury, the idea breeds as if it
+ * were worth half the gap less: a jury 13 against a second opinion of 11
+ * breeds like a 12. Either direction counts, since disagreement is
+ * uncertainty, not a verdict. A hand-set medal is a person's call: no penalty.
+ */
+export function doubtPenalty(idea) {
+  if (Number.isInteger(idea?.medalOverride)) return 0;
+  const band = confidenceBand(idea);
+  return band ? band.gap / 2 : 0;
 }
 
 function tournament(pool, k, rng, stats) {
