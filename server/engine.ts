@@ -289,7 +289,7 @@ export function createEngine(deps: Deps) {
 
   // ---------------------------------------------------------------- creating ideas
 
-  async function doExpand(parentId: number) {
+  async function doExpand(parentId: number, escape: string | null = null) {
     const parent = mustIdea(parentId);
     const board = mustBoard(parent.boardId);
     // The parent's lift recipe becomes the children's task (or, by lot, the placebo), and they remember it so the hit can be counted.
@@ -300,7 +300,7 @@ export function createEngine(deps: Deps) {
     const spots = arcPositions(parent, repo.parentsOf(parent.id)[0] ?? null, ideas.length);
     const lift = task ? { type: task.type, from: parent.id, base: task.base, arm: task.arm } : null;
     const created = ideas.map((i, n) =>
-      repo.insertIdea({ boardId: board.id, ...i, kind: 'expand', x: spots[n].x, y: spots[n].y, generation: parent.generation + 1, lift }, [parent.id]),
+      repo.insertIdea({ boardId: board.id, ...i, kind: 'expand', x: spots[n].x, y: spots[n].y, generation: parent.generation + 1, lift, escape }, [parent.id]),
     );
     const edges = created.map((c) => ({ from: parent.id, to: c.id }));
     emitIdeas(board.id, created);
@@ -308,7 +308,7 @@ export function createEngine(deps: Deps) {
     return { ideas: created, edges };
   }
 
-  async function doCombine(boardId: number, aId: number, bId: number) {
+  async function doCombine(boardId: number, aId: number, bId: number, escape: string | null = null) {
     const board = mustBoard(boardId);
     if (!Number.isInteger(aId) || !Number.isInteger(bId) || aId === bId) throw new AppError(400, 'bad_pair', 'Pick two different ideas');
     const a = mustIdea(aId);
@@ -326,6 +326,7 @@ export function createEngine(deps: Deps) {
         x: (a.x + c.x) / 2 + (-dy / len) * 70, y: (a.y + c.y) / 2 + (dx / len) * 70,
         generation: Math.max(a.generation, c.generation) + 1,
         lift: task ? { type: task.type, from: task.from.id, base: task.base, arm: task.arm } : null,
+        escape,
       },
       [a.id, c.id],
     );
@@ -546,7 +547,9 @@ export function createEngine(deps: Deps) {
     /**
      * One autopilot step: judge what is unjudged, otherwise breed (combine by
      * tournament selection) or mutate (expand a strong idea). Awaits its own
-     * judgements so the next step sees the scores.
+     * judgements so the next step sees the scores. In a keyword monoculture
+     * (diversity() in evolve.js) one parent comes from outside it, and the
+     * children store the escaped keyword in `escape`.
      */
     async autoStep(boardId: number): Promise<{ did: 'idle' | 'judge' | 'expand' | 'combine'; reason?: string; ids?: number[] }> {
       mustBoard(boardId);
@@ -565,11 +568,11 @@ export function createEngine(deps: Deps) {
       const move = nextMove(ideas, repo.listEdges(boardId), { busy: judging });
       if (!move) return { did: 'idle', reason: 'nothing_to_do' };
       if (move.type === 'expand') {
-        const r = await doExpand(move.idea.id);
+        const r = await doExpand(move.idea.id, move.escape ?? null);
         await judgeAll(r.ideas.map((i) => i.id));
         return { did: 'expand', ids: r.ideas.map((i) => i.id) };
       }
-      const r = await doCombine(boardId, move.a.id, move.b.id);
+      const r = await doCombine(boardId, move.a.id, move.b.id, move.escape ?? null);
       await judgeAll([r.idea.id]);
       return { did: 'combine', ids: [r.idea.id] };
     },

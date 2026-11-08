@@ -1,12 +1,15 @@
 // The app: boards, the canvas, panels, dialogs, live updates.
 
 import { api, follow } from './api.js';
-import { $, h, clear, toast, debounce } from './dom.js';
+import { $, h, clear, toast, debounce, svg } from './dom.js';
 import { t, getLang, setLang, applyI18n, errorText } from './i18n.js';
 import { Graph, KIND_COLORS } from './graph.js';
 import { loadSettings, saveSettings, pushSettings, ROLES, PROVIDER_IDS, providersInUse, DEFAULTS } from './settings.js';
 import { medal, scoreSum, fitness, CRITERIA, isJudged, onMedalEdge, confidenceBand, MEDAL_MIN_SUM, goldGate, retrialSum } from './score.js';
-import { evolutionStats, liftStats, LIFT_TYPES, doubtPenalty, armOf, armHit, trialStats, trialVerdict, ARMS, TRIAL_MIN } from './evolve.js';
+import {
+  evolutionStats, liftStats, LIFT_TYPES, doubtPenalty, armOf, armHit, trialStats, trialVerdict, ARMS, TRIAL_MIN,
+  diversity, diversitySeries, pressureStats, MONOCULTURE_SHARE, DIVERSITY_WINDOW,
+} from './evolve.js';
 import { openDashboard } from './dashboard.js';
 import { openReport } from './report.js';
 import { initBuilds, onBuildEvent, buildFor, startBuild, openBuilds, buildIcon, formatSeq } from './builds.js';
@@ -514,6 +517,42 @@ function liftOverview(ideas) {
   );
 }
 
+/**
+ * Overview: the diversity gauge. One bar per bred idea: the share of the
+ * last DIVERSITY_WINDOW bred ideas that carry the board's most common
+ * keyword, with the monoculture line. Says which theme dominates, when the
+ * current monoculture began, and what the autopilot's pressure has done.
+ */
+function diversityOverview(ideas) {
+  const series = diversitySeries(ideas);
+  if (!series.length) return null;
+  const now = diversity(ideas);
+  const p = pressureStats(ideas);
+  const W = 260, H = 44, line = H - MONOCULTURE_SHARE * H;
+  const shown = series.slice(-120); // keep bars at least ~2 px wide
+  const bw = W / shown.length;
+  const pct = (x) => Math.round(x * 100);
+  const time = (at) => (at ? new Date(`${at.replace(' ', 'T')}Z`).toLocaleString(getLang() === 'sv' ? 'sv-SE' : 'en-GB', { dateStyle: 'short', timeStyle: 'short' }) : '');
+  const bars = shown.map((pt, n) =>
+    svg('rect', { x: (n * bw).toFixed(2), y: (H - pt.share * H).toFixed(2), width: Math.max(1, bw - 0.6).toFixed(2), height: (pt.share * H).toFixed(2),
+      class: pt.monoculture ? 'div-bar mono' : 'div-bar' },
+      svg('title', {}, `#${pt.id} · ${pt.keyword} ${pct(pt.share)}%`)));
+  return h('div', { class: `evo diversity ${now.monoculture ? 'mono' : ''}` },
+    h('span', { class: 'muted', title: t('divHint', { pct: pct(MONOCULTURE_SHARE), n: DIVERSITY_WINDOW }) }, t('divTitle')),
+    h('div', {}, t('divNow', { kw: now.keyword, c: now.count, n: now.total, pct: pct(now.share) })),
+    svg('svg', { class: 'div-gauge', viewBox: `0 0 ${W} ${H}`, preserveAspectRatio: 'none', role: 'img', 'aria-label': t('divAria', { pct: pct(now.share) }) },
+      bars,
+      svg('line', { x1: 0, x2: W, y1: line, y2: line, class: 'div-line' })),
+    h('div', { class: `div-state ${now.monoculture ? 'mono' : 'ok'}` },
+      now.monoculture
+        ? t('divMono', { kw: now.keyword, id: p.since?.id ?? '?', at: time(p.since?.at) })
+        : t('divOk', { pct: pct(MONOCULTURE_SHARE) })),
+    p.escapes
+      ? h('div', { class: 'muted' }, t('divEscapes', { n: p.escapes, j: p.judged, left: p.left, at: time(p.last?.createdAt) }))
+      : now.monoculture ? h('div', { class: 'muted' }, t('divNoEscapes')) : null,
+  );
+}
+
 function renderIdea(idea) {
   const panel = $('#panel');
   const spun = S.spinoffs.filter((s) => s.ideaId === idea.id);
@@ -540,6 +579,11 @@ function renderIdea(idea) {
     idea.sourceUrl ? h('a', { class: 'source', href: idea.sourceUrl, target: '_blank', rel: 'noopener noreferrer' }, `${t('source')} ↗`) : null,
     scoreBlock(idea),
     doubtBlock(idea),
+    idea.escape
+      ? h('p', { class: 'escape-note', title: t('divHint', { pct: Math.round(MONOCULTURE_SHARE * 100), n: DIVERSITY_WINDOW }) },
+          `🌱 ${t('escapeNote', { kw: idea.escape })}`,
+          idea.keywords?.length ? h('span', { class: 'muted' }, ' · ', idea.keywords.includes(idea.escape) ? t('escapeStill') : t('escapeLeft')) : null)
+      : null,
     liftBlock(idea),
     idea.keywords?.length
       ? h('div', { class: 'chips' }, idea.keywords.map((k) => h('button', { class: 'chip', onclick: () => openDashboard({ keyword: k, onOpenIdea }) }, k)))
@@ -648,6 +692,7 @@ function renderOverview() {
             ? t('evoLine', { g: stats.generation, first: fmt(stats.first), latest: fmt(stats.latest), best: stats.best })
             : t('evoShort', { g: stats.generation, best: stats.best })))
       : null,
+    diversityOverview(ideas),
     liftOverview(ideas),
     h('section', { class: 'summary' },
       h('div', { class: 'row space' }, h('h3', {}, t('summary')),

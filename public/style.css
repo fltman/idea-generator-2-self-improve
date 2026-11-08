@@ -155,6 +155,15 @@ table.trial .trial-total th, table.trial .trial-total td { border-top: 1px solid
 .trial-verdict { font-size: 12px; color: var(--text-2); }
 .trial-verdict.ahead { color: #5fd38d; }
 .trial-verdict.behind { color: #e58a7a; }
+.diversity .div-gauge { display: block; width: 100%; height: 44px; margin: 6px 0 4px; background: rgba(255,255,255,.03); border-radius: 4px; }
+.div-bar { fill: #6f8fd8; }
+.div-bar.mono { fill: #e0a458; }
+.div-line { stroke: #e58a7a; stroke-width: 1; stroke-dasharray: 3 3; vector-effect: non-scaling-stroke; }
+.div-state { font-size: 12px; }
+.div-state.ok { color: #5fd38d; }
+.div-state.mono { color: #e0a458; }
+.diversity .muted { font-size: 12px; }
+.escape-note { font-size: 12px; color: #e0a458; margin: 0 0 10px; }
 .doubt { margin: 0 0 12px; padding: 10px 12px; border-radius: var(--radius); border: 1px solid var(--line); font-size: 12px; }
 .doubt.disagree { border-color: rgba(229,138,122,.55); }
 .doubt.agree { border-color: rgba(95,211,141,.45); }

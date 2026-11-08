@@ -4,6 +4,7 @@ import { clampScore, fitness, medal, medalFromSum, scoreSum, onMedalEdge, confid
 import {
   breedScore, doubtPenalty, evolutionStats, expandedIds, liftHit, liftRate, liftStats, nextMove, pairKey, pickRecipe, recipeOf, usedPairs,
   assignArm, armOf, armHit, trialStats, trialVerdict, PLACEBO_RATE, TRIAL_MIN,
+  diversity, diversitySeries, pressureStats, MONOCULTURE_SHARE, DIVERSITY_MIN,
 } from '../public/js/evolve.js';
 
 const idea = (id: number, sum: number | null, extra: any = {}) => {
@@ -282,4 +283,74 @@ test('gold gate: a jury gold on the edge waits for the second judge; only agreem
   assert.equal(goldGate(idea(1, 13, second(4, 4, 4))), 'contested');
   assert.equal(goldGate(idea(1, 13, { ...second(1, 1, 1), medalOverride: 3 })), null, 'a hand-set gold is the human\'s call');
   assert.equal(goldGate(idea(1, 13, { retrial: { originality: 4, feasibility: 'x', impact: 4 } })), 'waiting', 'a malformed opinion is no opinion');
+});
+
+// ---------------------------------------------------------------- diversity pressure
+
+const kw = (id: number, sum: number | null, keywords: string[], extra: any = {}) => idea(id, sum, { keywords, ...extra });
+
+test('diversity: the share of recent bred ideas carrying the top keyword; seeds and guests do not count', () => {
+  const ideas = [
+    kw(1, 9, ['camera'], { kind: 'seed' }), kw(2, 9, ['camera'], { kind: 'guest' }),
+    ...Array.from({ length: 8 }, (_, n) => kw(10 + n, 10, ['lift recipe', 'jury'])),
+    ...Array.from({ length: 4 }, (_, n) => kw(20 + n, 10, [`other ${n}`])),
+  ];
+  const d = diversity(ideas);
+  assert.deepEqual([d.keyword, d.count, d.total], ['jury', 8, 12], 'a tie between keywords goes alphabetically');
+  assert.ok(Math.abs(d.share - 8 / 12) < 1e-9);
+  assert.equal(d.monoculture, true, `${MONOCULTURE_SHARE * 100}% or more of at least ${DIVERSITY_MIN} ideas`);
+  assert.equal(diversity(ideas.slice(0, -1)).monoculture, false, `fewer than ${DIVERSITY_MIN} bred ideas: too few to call it`);
+  const mixed = [...ideas, ...Array.from({ length: 6 }, (_, n) => kw(30 + n, 10, [`new ${n}`]))];
+  assert.equal(diversity(mixed).monoculture, false, '8 of 18 is below the line');
+  assert.equal(diversity(mixed, 6).keyword, 'new 0', 'only the window counts');
+});
+
+test('diversity pressure: in a monoculture every breed takes a parent from outside the theme, still by score', () => {
+  const inside = Array.from({ length: 14 }, (_, n) => kw(n + 1, 13, ['lift recipe']));
+  const outside = [kw(50, 9, ['camera']), kw(51, 11, ['export']), kw(52, 10, ['sound'])];
+  const ideas = [...inside, ...outside];
+  const outIds = new Set(outside.map((i) => i.id));
+  let fromBest = 0;
+  for (let s = 0; s < 200; s++) {
+    const m = nextMove(ideas, [], { rng: rngFrom(s), mutationRate: 0 })!;
+    assert.equal(m.type, 'combine');
+    assert.equal(m.escape, 'lift recipe');
+    assert.ok(outIds.has(m.a.id) || outIds.has(m.b.id), `seed ${s}: no parent outside`);
+    if (m.a.id === 51) fromBest++;
+  }
+  assert.ok(fromBest > 100, `the tournament still prefers the strongest outsider: ${fromBest}/200`);
+  const ex = nextMove(ideas, [], { rng: rngFrom(1), mutationRate: 1 })!;
+  assert.deepEqual([ex.type, ex.idea.id, ex.escape], ['expand', 51, 'lift recipe'], 'a mutation expands the best idea outside the theme');
+  const off = nextMove(ideas, [], { rng: rngFrom(1), mutationRate: 1, diversity: false })!;
+  assert.equal(off.escape, undefined);
+  assert.ok(!outIds.has(off.idea.id), 'without pressure the strongest idea wins');
+});
+
+test('diversity pressure: no monoculture, or nothing outside it, breeds as before', () => {
+  const varied = Array.from({ length: 14 }, (_, n) => kw(n + 1, 10 + (n % 3), [`theme ${n % 5}`]));
+  for (let s = 0; s < 20; s++) assert.equal(nextMove(varied, [], { rng: rngFrom(s) })?.escape, undefined);
+  const all = Array.from({ length: 14 }, (_, n) => kw(n + 1, 10, ['same']));
+  for (let s = 0; s < 20; s++) assert.equal(nextMove(all, [], { rng: rngFrom(s) })?.escape, undefined);
+  // the same rng draws as without the feature, so a board without keywords is untouched
+  const plain = Array.from({ length: 6 }, (_, n) => idea(n + 1, 9 + n));
+  for (let s = 0; s < 20; s++) assert.deepEqual(nextMove(plain, [], { rng: rngFrom(s) }), nextMove(plain, [], { rng: rngFrom(s), diversity: false }));
+});
+
+test('diversity gauge: the series over time, when the monoculture began, and what the pressure did', () => {
+  const at = (n: number) => `2026-11-08 10:${String(n).padStart(2, '0')}:00`;
+  const ideas = [
+    ...Array.from({ length: 12 }, (_, n) => kw(n + 1, 10, [`t${n}`], { createdAt: at(n) })),
+    ...Array.from({ length: 20 }, (_, n) => kw(20 + n, 10, ['lift recipe'], { createdAt: at(20 + n) })),
+    kw(60, 10, ['camera'], { escape: 'lift recipe', createdAt: at(50) }),
+    kw(61, 10, ['lift recipe'], { escape: 'lift recipe', createdAt: at(51) }),
+    kw(62, null, [], { escape: 'lift recipe', createdAt: at(52) }),
+  ];
+  const series = diversitySeries(ideas);
+  assert.equal(series.length, 34 - DIVERSITY_MIN + 1, 'one point per tagged bred idea from the 12th on');
+  assert.ok(series[0].share < 0.1 && series.at(-1)!.share > MONOCULTURE_SHARE);
+  const first = series.find((p) => p.monoculture)!;
+  const p = pressureStats(ideas);
+  assert.deepEqual(p.since, { id: first.id, at: first.at, keyword: 'lift recipe' }, 'the start of the current run above the line');
+  assert.deepEqual([p.escapes, p.judged, p.left, p.last.id], [3, 2, 1, 62], 'one of two judged escapes really left the theme');
+  assert.equal(pressureStats(ideas.slice(0, 14)).since, null, 'no monoculture, no start');
 });
