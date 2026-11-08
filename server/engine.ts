@@ -183,11 +183,40 @@ export function createEngine(deps: Deps) {
         }
       }
       emitIdeas(board.id, [out.idea]);
+      // A recipe child: did it really carry out the recipe? Only an applied recipe's hit counts.
+      out.idea = (await checkLift(board, out.idea)) ?? out.idea;
       // A verdict one point from another medal gets a blind second opinion, in the background.
       if (autoRetrial(board, out.idea)) queueRetrial(out.idea.id);
       return out;
     } finally {
       setJudging(board.id, [idea.id], false);
+    }
+  }
+
+  // ---------------------------------------------------------------- recipe check
+
+  /**
+   * After a recipe-arm child is judged, the judge model is shown the parent,
+   * the recipe and the child (no scores, no medals) and rules whether the
+   * child applied the recipe. Once per child: the text does not change on a
+   * re-judge. Skipped when the parent's recipe is gone or has changed type
+   * since the breed (it is no longer the recipe the child was handed). A
+   * failed check leaves the child unchecked; it never fails the verdict.
+   */
+  async function checkLift(board: Board, idea: Idea): Promise<Idea | null> {
+    if (armOf(idea) !== 'recipe' || idea.liftApplied != null || !idea.liftFrom) return null;
+    const parent = repo.getIdea(idea.liftFrom);
+    if (!parent?.recipe || parent.recipeType !== idea.liftType) return null;
+    try {
+      const r = await call(board.id, () =>
+        llm.checkLift({ model: modelFor(board, 'judge'), parent, recipe: { type: parent.recipeType!, change: parent.recipe! }, child: idea, lang: board.config.lang }),
+      );
+      if (r.applied == null) return null;
+      const saved = repo.saveLiftCheck(idea.id, { applied: r.applied, reason: r.reason })!;
+      emitIdeas(board.id, [saved]);
+      return saved;
+    } catch {
+      return null;
     }
   }
 

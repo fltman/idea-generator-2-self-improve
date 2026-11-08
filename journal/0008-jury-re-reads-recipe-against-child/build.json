@@ -1,0 +1,76 @@
+{
+  "seq": 8,
+  "title": "Jury Re-Reads Recipe Against Child",
+  "pitch": "After a child is judged, the jury is shown parent, recipe and child, and rules whether the child really applied the recipe. Hits count only if applied. The panel shows 'applied' or 'ignored', and the overview splits hit rates by applied status.",
+  "status": "merged",
+  "trigger": "hand",
+  "branch": "build/0008-jury-re-reads-recipe-against-child",
+  "commit": null,
+  "summary": "I built the recipe check and committed it on the build branch; all 97 tests pass, including 2 new ones. After the jury judges a child that was given a recipe, the judge model is shown the parent, the recipe and the child, but no scores or medal, and rules whether the child carried the recipe out. The child's panel now says \"✓ recipe applied\" or \"✗ recipe ignored\" with the checker's reason. An ignored child counts as neither hit nor miss in the hit rate that steers breeding, and the overview splits recipe hits into Applied, Ignored and Unchecked. The placebo and net-lift comparisons still count every recipe child, so they stay fair, and the journal says plainly that the screenshot rulings are made up because no real check has run yet.",
+  "error": null,
+  "costUsd": 2.01,
+  "sessionId": "1c7f111e-e8c7-408e-9dd4-5a310d43c76d",
+  "createdAt": "2026-11-08 09:22:41",
+  "startedAt": "2026-11-08 09:25:39",
+  "finishedAt": "2026-11-08 09:31:19",
+  "jury": {
+    "originality": 4,
+    "feasibility": 4,
+    "impact": 3,
+    "reason": "Fixes a real flaw in the recipe hit-rate measurement by checking whether the recipe was applied, so it fits the goal well; but it adds one more LLM call per child."
+  },
+  "lineage": [
+    {
+      "kind": "combine",
+      "title": "Lift Tip Stale-Check Before Breeding",
+      "pitch": "The jury attaches one typed lift tip (criterion plus type) to each verdict. The child receives it as its task, and the next judging records whether the medal rose. Rolling hit rate per type shows in a panel and weights parent and cross picks."
+    },
+    {
+      "kind": "seed",
+      "title": "Jury says what would lift each idea one medal",
+      "pitch": "When the jury scores an idea, it should also say what would lift it one medal, and the next generation should try exactly that."
+    },
+    {
+      "kind": "combine",
+      "title": "Lift Recipe Duel Ledger",
+      "pitch": "Jury writes a typed lift recipe (criterion + type) per idea; autopilot hands it to the child as its task and logs whether the medal rose. The panel shows the recipe beside the sibling's, per criterion, with hit rate per recipe and cross type. That hit rate weights parent and cross selection."
+    },
+    {
+      "kind": "combine",
+      "title": "Lyftrecept som mäts och styr urvalet",
+      "pitch": "Juryn ger varje idé ett typmärkt lyftrecept (kriterium + typ, t.ex. \"skärp genomförbarhet\"). Nästa generation får receptet som uppgift, och autopilotens logg räknar hur ofta det lyfte en medalj. Idépanelen visar receptet, träffsäkerheten per receptyp och korstyp, och urvalet viktas efter den."
+    },
+    {
+      "kind": "combine",
+      "title": "Lyftbok med duellvy och träffsäkerhet",
+      "pitch": "Juryn skriver ett typmärkt lyftrecept per idé. Autopiloten ger det som uppgift åt avkomman och loggar om medaljen steg. Idépanelen jämför receptet per kriterium med syskonets och visar träffsäkerheten, som också viktar föräldra- och korstypsval."
+    },
+    {
+      "kind": "combine",
+      "title": "Jämförbara lyftrecept med träffsäkerhet",
+      "pitch": "Juryn ger varje idé ett typmärkt lyftrecept. Idépanelen visar sida vid sida varför en idé slog en annan, per kriterium, plus recepttypens och korstypens träffsäkerhet från autopilotens logg. Urvalet viktas efter den träffsäkerheten."
+    },
+    {
+      "kind": "combine",
+      "title": "Lyftrecept med mätt träffsäkerhet",
+      "pitch": "Juryn skriver ett typmärkt lyftrecept per idé. Autopiloten ger det som uppgift åt avkomman, loggar om medaljen lyfte per recepttyp och korstyp, och viktar både föräldraval och korstyp efter träffsäkerheten, som visas i idépanelen."
+    },
+    {
+      "kind": "seed",
+      "title": "People watching the board cannot tell why one idea won over another: make the jury’s reasoning visible and comparable.",
+      "pitch": ""
+    },
+    {
+      "kind": "combine",
+      "title": "Lyftrecept styr korstyper",
+      "pitch": "Juryn skriver för varje idé ett \"lyftrecept\": vilken enskild ändring som ger nästa medalj, märkt med en typ (t.ex. originalitet, genomförbarhet). Autopiloten loggar vilka korstyper och recept som faktiskt lyfte medaljen, viktar urvalet därefter och visar träffsäkerheten per korstyp i idépanelen."
+    },
+    {
+      "kind": "seed",
+      "title": "The autopilot should learn which kinds of crosses tend to produce gold on a board, and breed more of those.",
+      "pitch": ""
+    }
+  ],
+  "filmLine": "For 93 experiments the app scored its recipes without once asking whether the children had followed them; now a second reader, blind to the scores, checks every child.",
+  "tests": "✔ diversity: the share of recent bred ideas carrying the top keyword; seeds and guests do not count (0.145875ms)\n✔ diversity pressure: in a monoculture every breed takes a parent from outside the theme, still by score (1.614042ms)\n✔ diversity pressure: no monoculture, or nothing outside it, breeds as before (0.408583ms)\n✔ diversity gauge: the series over time, when the monoculture began, and what the pressure did (0.338333ms)\nℹ tests 97\nℹ suites 0\nℹ pass 97\nℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 5188.42475"
+}

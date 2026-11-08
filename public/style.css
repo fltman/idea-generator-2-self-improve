@@ -162,6 +162,13 @@ table.trial .trial-total th, table.trial .trial-total td { border-top: 1px solid
 .net-chip.net-up { color: #5fd38d; border-color: rgba(95,211,141,.45); }
 .net-chip.net-down { color: #e58a7a; border-color: rgba(229,138,122,.45); }
 .net-chip.net-none, .net-chip.net-flat { color: var(--text-2); }
+.lift-check { margin-top: 4px; font-size: 12px; }
+.lift-check.applied .applied-badge { color: #5fd38d; }
+.lift-check.ignored .applied-badge { color: #e58a7a; }
+.applied-split { margin-top: 8px; font-size: 12px; }
+.applied-cells { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 4px; font-variant-numeric: tabular-nums; }
+.applied-cell.applied b { color: #5fd38d; }
+.applied-cell.ignored b { color: #e58a7a; }
 .lift-net { font-size: 12px; margin-top: 2px; }
 .lift-net.net-up { color: #5fd38d; }
 .lift-net.net-down { color: #e58a7a; }

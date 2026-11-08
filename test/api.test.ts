@@ -17,6 +17,8 @@ let judgeKeywords = ['Public Space', 'sound'];
 let judgeLift: Record<string, string> = {}; // liftType + lift, when a test wants the jury to write a recipe
 let retrialScores: typeof judgeScores | null = null; // what the second judge (the retrial model) answers, when a test sets it
 let trialLot = 0.99; // placebo trials: the engine's lot; below PLACEBO_RATE sends a recipe breed to the placebo arm
+let liftCheckAnswer: { applied: boolean; reason: string } | null = null; // the recipe check's ruling; null: no boolean (unchecked)
+let liftCheckFails = false; // the recipe check's provider call throws
 let failNext: Error | null = null;
 let xCitations: string[] = [];
 
@@ -28,11 +30,13 @@ async function fakeChat(r: ChatRequest) {
     failNext = null;
     throw e;
   }
+  if (liftCheckFails && r.schemaName === 'liftcheck') throw new Error('provider down');
   const n = calls.length;
   const value =
     r.schemaName === 'expand' ? { ideas: [1, 2, 3].map((k) => ({ title: `"Barn ${n}.${k}."`, pitch: `Pitch ${k}` })) }
     : r.schemaName === 'judgement' && retrialScores && r.model === settings.models.retrial ? { reason: 'Andra domaren tvekar.', ...retrialScores, keywords: judgeKeywords }
     : r.schemaName === 'judgement' ? { reason: 'Stark mekanism, oklar kund.', ...judgeScores, keywords: judgeKeywords, ...judgeLift }
+    : r.schemaName === 'liftcheck' ? (liftCheckAnswer ?? { reason: 'Oklart.' })
     : r.schemaName === 'summary' ? { headline: 'Tavlan rör sig mot ljud.', themes: [{ name: 'Ljud', insight: 'Allt låter.', ideas: ['Lånecyklar'] }], strongest: [{ title: 'Korsning', why: 'Konkret.' }], gaps: ['Ingen tänker på natten.'], nextSteps: ['Korsa A och B.'] }
     : r.schemaName === 'synthesis' ? { headline: 'Bänkarna dominerar.', insights: ['i1', 'i2', 'i3'], standouts: [{ title: 'Sjungande parkbänk', board: 'X', why: 'w' }], opportunities: ['o1', 'o2'], nextSteps: ['n1', 'n2'] }
     : r.schemaName === 'brief' ? { name: 'Sjungande bänk', slug: 'Sjungande Bänk!', oneLiner: 'En bänk som sjunger.', problem: 'P', audience: 'A', mvp: ['m1', 'm2'], outOfScope: ['o'], stack: 's', firstSteps: ['f1', 'f2'], openQuestions: ['q1'], risks: ['r1'] }
@@ -505,6 +509,85 @@ test('placebo trials: by lot a breed gets a vague task instead of the recipe, an
   }
 });
 
+test('recipe check: after the verdict the judge model rules, blind to scores, whether a recipe child applied its recipe; only applied hits count', async () => {
+  const { liftStats, liftHit, appliedStats } = await import('../public/js/evolve.js');
+  try {
+    judgeScores = { originality: 3, feasibility: 3, impact: 3 }; // 9: bronze
+    judgeLift = { liftType: 'impact', lift: 'Mät minskade bilresor.' };
+    const board = await newBoard();
+    const s = await seed(board.id, 'Lånecykel i trapphuset');
+    await engine.idle();
+    assert.equal(repo.getIdea(s.id)!.liftApplied, null, 'a seed has no recipe task, so no check');
+    assert.ok(!calls.some((c) => c.schemaName === 'liftcheck' && c.user.includes('Lånecykel i trapphuset')));
+
+    // The children ignore the recipe; the medal rises anyway.
+    judgeScores = { originality: 4, feasibility: 4, impact: 3 }; // 11: silver
+    judgeLift = {};
+    liftCheckAnswer = { applied: false, reason: 'Ingen mätning av bilresor syns.' };
+    const before = calls.length;
+    const { data } = await api('POST', `/api/ideas/${s.id}/expand`, {});
+    await engine.idle();
+    const checks = calls.slice(before).filter((c) => c.schemaName === 'liftcheck');
+    assert.equal(checks.length, 3, 'one check per recipe child');
+    assert.match(checks[0].user, /Lånecykel i trapphuset[\s\S]*Mät minskade bilresor[\s\S]*Barn/, 'parent, recipe, child');
+    assert.doesNotMatch(checks[0].user, /Stark mekanism|silver|bronze|\/15/i, 'blind: no scores, verdict or medal');
+    assert.equal(checks[0].model, settings.models.judge);
+    for (const i of data.ideas) {
+      const k = repo.getIdea(i.id)!;
+      assert.deepEqual([k.liftApplied, k.liftCheck], [false, 'Ingen mätning av bilresor syns.']);
+      assert.equal(liftHit(k), null, 'an ignored recipe is neither hit nor miss');
+    }
+    assert.deepEqual(liftStats(repo.listIdeas(board.id)).impact, { tries: 0, hits: 0 });
+    const { data: payload } = await api('GET', `/api/boards/${board.id}`);
+    assert.equal(payload.ideas.find((i: any) => i.id === data.ideas[0].id).liftApplied, false, 'the board payload carries the ruling');
+
+    // Re-judging does not re-check: the text has not changed.
+    const n = calls.length;
+    await api('POST', `/api/ideas/${data.ideas[0].id}/judge`, {});
+    await engine.idle();
+    assert.equal(calls.slice(n).filter((c) => c.schemaName === 'liftcheck').length, 0);
+
+    // Applied children count as hits; a check with no ruling leaves the child unchecked, and it still counts as before.
+    liftCheckAnswer = { applied: true, reason: 'Mäter bilresor per vecka.' };
+    const cross = await api('POST', `/api/boards/${board.id}/combine`, { a: s.id, b: data.ideas[1].id });
+    await engine.idle();
+    const applied = repo.getIdea(cross.data.idea.id)!;
+    assert.deepEqual([applied.liftArm, applied.liftApplied], ['recipe', true]);
+    assert.equal(liftHit(applied), true);
+    liftCheckAnswer = null;
+    const e2 = await api('POST', `/api/ideas/${s.id}/expand`, {});
+    await engine.idle();
+    assert.equal(repo.getIdea(e2.data.ideas[0].id)!.liftApplied, null);
+    const split = appliedStats(repo.listIdeas(board.id));
+    assert.deepEqual(split, { applied: { tries: 1, hits: 1 }, ignored: { tries: 3, hits: 3 }, unchecked: { tries: 3, hits: 3 } });
+    assert.deepEqual(liftStats(repo.listIdeas(board.id)).impact, { tries: 4, hits: 4 }, 'applied + unchecked, not ignored');
+
+    // Placebo children get no check (they were told no recipe).
+    trialLot = 0;
+    const m = calls.length;
+    await api('POST', `/api/ideas/${s.id}/expand`, {});
+    await engine.idle();
+    assert.equal(calls.slice(m).filter((c) => c.schemaName === 'liftcheck').length, 0);
+
+    // A failing check never fails the verdict.
+    trialLot = 0.99;
+    liftCheckFails = true;
+    const e3 = await api('POST', `/api/ideas/${s.id}/expand`, {});
+    await engine.idle();
+    for (const i of e3.data.ideas) {
+      const k = repo.getIdea(i.id)!;
+      assert.ok(k.judgedAt && k.originality === 4, 'judged all the same');
+      assert.equal(k.liftApplied, null);
+    }
+  } finally {
+    trialLot = 0.99;
+    liftCheckAnswer = null;
+    liftCheckFails = false;
+    judgeLift = {};
+    judgeScores = { originality: 3, feasibility: 3, impact: 3 };
+  }
+});
+
 test('lift recipes: an old database gets the new columns', async () => {
   const { DatabaseSync } = await import('node:sqlite');
   const file = join(mkdtempSync(join(tmpdir(), 'ideagen-olddb-')), 'old.db');
@@ -527,6 +610,9 @@ test('lift recipes: an old database gets the new columns', async () => {
   assert.equal(r.getIdea(i.id)!.retrial!.originality, 2, 'the retrial column was added too');
   const k = r.insertIdea({ boardId: b.id, title: 'K', pitch: '', kind: 'expand', x: 0, y: 0, generation: 1, lift: { type: 'impact', from: i.id, base: 1, arm: 'placebo' } }, [i.id]);
   assert.equal(r.getIdea(k.id)!.liftArm, 'placebo', 'the lift_arm column was added too');
+  assert.equal(r.getIdea(k.id)!.liftApplied, null);
+  r.saveLiftCheck(k.id, { applied: true, reason: 'Ja.' });
+  assert.deepEqual([r.getIdea(k.id)!.liftApplied, r.getIdea(k.id)!.liftCheck], [true, 'Ja.'], 'the recipe-check columns were added too');
   const e = r.insertIdea({ boardId: b.id, title: 'E', pitch: '', kind: 'expand', x: 0, y: 0, generation: 1, escape: 'lift recipe' }, [i.id]);
   assert.equal(r.getIdea(e.id)!.escape, 'lift recipe', 'the escape column was added too');
   assert.equal(got.escape, null);

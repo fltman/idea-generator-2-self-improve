@@ -67,10 +67,47 @@ export function liftRate(stats, type) {
   return s ? (s.hits + 1) / (s.tries + 2) : 0.5;
 }
 
-/** Did this bred idea's recipe lift the medal? null: no recipe task (placebo and no-task children too), or not judged yet. */
+/**
+ * Did this bred idea's recipe lift the medal? null: no recipe task (placebo
+ * and no-task children too), not judged yet, or the recipe check ruled that
+ * the child ignored its recipe (then the recipe was never tried, so it is
+ * neither a hit nor a miss). Unchecked children (older ideas, a failed check)
+ * still count, as they did before the check existed.
+ */
 export function liftHit(idea) {
   if (armOf(idea) !== 'recipe' || !LIFT_TYPES.includes(idea?.liftType)) return null;
+  if (idea.liftApplied === false) return null;
   return armHit(idea);
+}
+
+// ---------------------------------------------------------------- recipe check
+//
+// A child handed a recipe may simply not carry it out. After the jury's
+// verdict, the judge model reads parent, recipe and child (no scores) and
+// rules 'applied' or 'ignored' (idea.liftApplied true/false). Only applied
+// and unchecked recipe children feed liftStats(); the overview splits the
+// recipe arm's hit rate by that status, so you can see whether ignoring the
+// recipe was what kept the hit rate down.
+
+export const APPLIED_STATUSES = ['applied', 'ignored', 'unchecked'];
+
+/** 'applied', 'ignored' or 'unchecked' for a recipe-arm child; null for anything else. */
+export function appliedStatus(idea) {
+  if (armOf(idea) !== 'recipe') return null;
+  return idea.liftApplied === true ? 'applied' : idea.liftApplied === false ? 'ignored' : 'unchecked';
+}
+
+/** Recipe-arm children that have been judged: hits and tries per applied status. */
+export function appliedStats(ideas) {
+  const out = Object.fromEntries(APPLIED_STATUSES.map((s) => [s, { tries: 0, hits: 0 }]));
+  for (const i of ideas) {
+    const status = appliedStatus(i);
+    const hit = status && armHit(i);
+    if (status == null || hit == null) continue;
+    out[status].tries++;
+    if (hit) out[status].hits++;
+  }
+  return out;
 }
 
 // ---------------------------------------------------------------- placebo trials

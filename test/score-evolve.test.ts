@@ -6,6 +6,7 @@ import {
   assignArm, armOf, armHit, trialStats, trialVerdict, PLACEBO_RATE, TRIAL_MIN,
   diversity, diversitySeries, pressureStats, MONOCULTURE_SHARE, DIVERSITY_MIN,
   CONTROL_EVERY, controlDue, medalGain, netLiftStats, netNudge,
+  appliedStatus, appliedStats, APPLIED_STATUSES,
 } from '../public/js/evolve.js';
 
 const idea = (id: number, sum: number | null, extra: any = {}) => {
@@ -190,6 +191,24 @@ test('placebo trials: no recipe means the no-task arm against the best parent be
   assert.equal(assignArm([idea(1, 9), idea(2, 13)], {}, () => 0)!.from.id, 1, 'a gold parent cannot be lifted');
   assert.equal(assignArm([idea(1, 14)], {}, () => 0), null);
   assert.equal(assignArm([idea(1, null)], {}, () => 0), null);
+});
+
+test('recipe check: an ignored recipe is neither hit nor miss; the split counts applied, ignored and unchecked recipe children', () => {
+  const ideas = [
+    idea(1, 11, { liftType: 'impact', liftBase: 1, liftArm: 'recipe', liftApplied: true }), // applied hit
+    idea(2, 10, { liftType: 'impact', liftBase: 1, liftArm: 'recipe', liftApplied: true }), // applied miss
+    idea(3, 11, { liftType: 'impact', liftBase: 1, liftArm: 'recipe', liftApplied: false }), // ignored, rose anyway
+    idea(4, 11, { liftType: 'impact', liftBase: 1 }), // older idea, unchecked hit
+    idea(5, null, { liftType: 'impact', liftBase: 1, liftArm: 'recipe', liftApplied: true }), // not judged
+    idea(6, 11, { liftType: 'impact', liftBase: 1, liftArm: 'placebo', liftApplied: false }), // not a recipe child
+  ];
+  assert.deepEqual(ideas.map(appliedStatus), ['applied', 'applied', 'ignored', 'unchecked', 'applied', null]);
+  assert.deepEqual(ideas.map(liftHit), [true, false, null, true, null, null]);
+  assert.deepEqual(liftStats(ideas).impact, { tries: 3, hits: 2 }, 'the ignored child does not steer breeding');
+  assert.deepEqual(appliedStats(ideas), { applied: { tries: 2, hits: 1 }, ignored: { tries: 1, hits: 1 }, unchecked: { tries: 1, hits: 1 } });
+  assert.deepEqual(APPLIED_STATUSES, ['applied', 'ignored', 'unchecked']);
+  // The placebo comparison is intention-to-treat: every recipe child stays in the recipe arm.
+  assert.deepEqual(trialStats(ideas).recipe.total, { tries: 4, hits: 3 });
 });
 
 test('placebo trials: hits per arm and type, only the recipe arm feeds liftStats, and the verdict waits for data', () => {
