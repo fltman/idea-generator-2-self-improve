@@ -142,6 +142,32 @@ const DUEL_SCHEMA = {
 
 // ---------------------------------------------------------------- prompts
 
+/** Codebase boards: what the code is, and the directions ideas for it could take. */
+const REPO_SCHEMA = {
+  type: 'object',
+  properties: {
+    summary: { type: 'string', description: 'What this codebase is and does, for whom, in 2–4 plain sentences. Only what the files show.' },
+    stack: { type: 'string', description: 'Languages, frameworks and how it runs and is tested, in one sentence.' },
+    focuses: {
+      type: 'array',
+      description: '4–6 directions that ideas for improving this codebase could take, the most promising first. Mix kinds: new features, UX, performance, reliability and tests, security, developer experience, and what this particular codebase most lacks.',
+      items: {
+        type: 'object',
+        properties: {
+          label: { type: 'string', description: 'The direction in 1–4 words, e.g. "New features", "Faster startup".' },
+          why: { type: 'string', description: 'One sentence: why this direction fits this codebase, citing something you saw in it.' },
+          seed: { type: 'string', description: 'One concrete starter idea in this direction, at most 110 characters.' },
+        },
+        required: ['label', 'why', 'seed'],
+        additionalProperties: false,
+      },
+    },
+  },
+  required: ['summary', 'stack', 'focuses'],
+  additionalProperties: false,
+};
+export type RepoFocus = { label: string; why: string; seed: string };
+
 const LANG_NAME: Record<Lang, string> = { sv: 'Swedish', en: 'English' };
 
 function languageRule(lang: Lang, fixed?: Lang) {
@@ -529,6 +555,33 @@ export function makeLLM(chat: ChatFn) {
       const title = String(value?.title ?? '').trim().slice(0, 120);
       const pitch = String(value?.pitch ?? '').trim().slice(0, 600);
       return { rewrite: title && pitch ? { title, pitch } : null, costUsd };
+    },
+
+    /**
+     * Codebase boards: read a scanned folder (file tree and docs, never code
+     * that was run) and propose directions for ideas. The person picks the
+     * directions; the board's goal and jury guidance are built from them.
+     */
+    async analyzeRepo(a: { model: string; scan: string; lang: Lang }) {
+      const { value, costUsd } = await chat({
+        model: a.model,
+        system:
+          'You are a senior engineer reading an unfamiliar codebase for the first time, to help its owner decide what kind of improvements to brainstorm. Base everything on the files shown; never invent features the files do not show.',
+        user: `${a.scan}
+
+Describe the codebase and propose directions for improvement ideas. Write in ${LANG_NAME[a.lang]}${a.lang === 'sv' ? ' (idiomatic Swedish)' : ''}.`,
+        schemaName: 'repoanalysis',
+        schema: REPO_SCHEMA,
+        temperature: 0.3,
+        maxTokens: 1200,
+      });
+      const cut = (v: unknown, n: number) => String(v ?? '').trim().slice(0, n);
+      const focuses: RepoFocus[] = (Array.isArray(value?.focuses) ? value.focuses : [])
+        .map((f: any) => ({ label: cut(f?.label, 60), why: cut(f?.why, 300), seed: cut(f?.seed, 120) }))
+        .filter((f: RepoFocus) => f.label)
+        .slice(0, 6);
+      if (!focuses.length) throw new Error('The model proposed no directions');
+      return { summary: cut(value?.summary, 800), stack: cut(value?.stack, 300), focuses, costUsd };
     },
   };
 }
