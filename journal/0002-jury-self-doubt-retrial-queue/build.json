@@ -1,0 +1,86 @@
+{
+  "seq": 2,
+  "title": "Jury Self-Doubt Retrial Queue",
+  "pitch": "The jury flags verdicts where its score sits at a medal threshold, or where its recipes keep failing. A second judge re-scores them blind with another model. Disagreements are shown in the panel as a confidence band and lower the idea's selection score.",
+  "status": "merged",
+  "trigger": "hand",
+  "branch": "build/0002-jury-self-doubt-retrial-queue",
+  "commit": null,
+  "summary": "I built a blind second judge for borderline verdicts, and it is committed on the branch. When a jury sum lands exactly on a medal line (9, 11 or 13), a second model scores the idea again without seeing the first verdict: a new \"Second judge\" role, `claudecode:opus` by default. On the self-improvement board this runs on its own; on other boards there is an \"Ask a second judge\" button. The idea panel shows the gap between the two scores as a band on the 3–15 scale, with both sums, the second judge's reason and whether the medals agree. Disagreement costs the idea half the gap when ideas are picked for breeding, but the medal stays the jury's. The 78 tests pass (5 new). The \"after\" screenshot shows a second opinion I faked in the browser, because no idea on the live board has a real one yet; the journal says so. Three things are left open and written down: I couldn't check how Opus scores on this scale (that costs money), I skipped the \"recipes keep failing\" trigger, and a 13 still starts a build before the second opinion arrives.",
+  "error": null,
+  "costUsd": 2.91,
+  "sessionId": "33e5c763-0a33-43bf-90e6-1135200ab3de",
+  "createdAt": "2026-11-08 07:59:22",
+  "startedAt": "2026-11-08 07:59:22",
+  "finishedAt": "2026-11-08 08:06:51",
+  "jury": {
+    "originality": 3,
+    "feasibility": 4,
+    "impact": 4,
+    "reason": "Fits the goal of a sharper, more honest jury: blind second-opinion re-scoring on borderline verdicts shows uncertainty, but it adds judge cost and \"flagged by failing recipes\" is loosely defined."
+  },
+  "lineage": [
+    {
+      "kind": "combine",
+      "title": "Typed Lift Recipes with Duel Hit Rates",
+      "pitch": "The jury attaches a typed lift recipe (criterion plus fix type) to each verdict. The child receives it as its task, and the resulting medal change is logged per recipe and cross type. The idea panel shows sibling recipes side by side per criterion with hit rates, and the autopilot weights parent and cross picks by those rates."
+    },
+    {
+      "kind": "combine",
+      "title": "Jämförbara lyftrecept med träffsäkerhet",
+      "pitch": "Juryn ger varje idé ett typmärkt lyftrecept. Idépanelen visar sida vid sida varför en idé slog en annan, per kriterium, plus recepttypens och korstypens träffsäkerhet från autopilotens logg. Urvalet viktas efter den träffsäkerheten."
+    },
+    {
+      "kind": "combine",
+      "title": "Recipe Hit-Rate Duel Panel",
+      "pitch": "For board watchers and the autopilot: the jury writes a typed lift recipe per idea; the child gets it as its task and the medal change is logged. The panel shows sibling recipes side by side per criterion with hit rates, and those rates weight parent and cross picks."
+    },
+    {
+      "kind": "seed",
+      "title": "People watching the board cannot tell why one idea won over another: make the jury’s reasoning visible and comparable.",
+      "pitch": ""
+    },
+    {
+      "kind": "combine",
+      "title": "Lyftrecept styr korstyper",
+      "pitch": "Juryn skriver för varje idé ett \"lyftrecept\": vilken enskild ändring som ger nästa medalj, märkt med en typ (t.ex. originalitet, genomförbarhet). Autopiloten loggar vilka korstyper och recept som faktiskt lyfte medaljen, viktar urvalet därefter och visar träffsäkerheten per korstyp i idépanelen."
+    },
+    {
+      "kind": "combine",
+      "title": "Lift Recipes Fed Back by Hit Rate",
+      "pitch": "The jury writes a typed one-medal lift recipe per idea. The autopilot hands it to the offspring as its task, then logs whether the medal rose. Parent and cross-type picks are weighted by each recipe type's hit rate, shown in the panel."
+    },
+    {
+      "kind": "combine",
+      "title": "Lift Recipe Duel Ledger",
+      "pitch": "Jury writes a typed lift recipe (criterion + type) per idea; autopilot hands it to the child as its task and logs whether the medal rose. The panel shows the recipe beside the sibling's, per criterion, with hit rate per recipe and cross type. That hit rate weights parent and cross selection."
+    },
+    {
+      "kind": "seed",
+      "title": "The autopilot should learn which kinds of crosses tend to produce gold on a board, and breed more of those.",
+      "pitch": ""
+    },
+    {
+      "kind": "seed",
+      "title": "Jury says what would lift each idea one medal",
+      "pitch": "When the jury scores an idea, it should also say what would lift it one medal, and the next generation should try exactly that."
+    },
+    {
+      "kind": "combine",
+      "title": "Lyftrecept med mätt träffsäkerhet",
+      "pitch": "Juryn skriver ett typmärkt lyftrecept per idé. Autopiloten ger det som uppgift åt avkomman, loggar om medaljen lyfte per recepttyp och korstyp, och viktar både föräldraval och korstyp efter träffsäkerheten, som visas i idépanelen."
+    },
+    {
+      "kind": "combine",
+      "title": "Lyftrecept som mäts och styr urvalet",
+      "pitch": "Juryn ger varje idé ett typmärkt lyftrecept (kriterium + typ, t.ex. \"skärp genomförbarhet\"). Nästa generation får receptet som uppgift, och autopilotens logg räknar hur ofta det lyfte en medalj. Idépanelen visar receptet, träffsäkerheten per receptyp och korstyp, och urvalet viktas efter den."
+    },
+    {
+      "kind": "combine",
+      "title": "Lyftbok med duellvy och träffsäkerhet",
+      "pitch": "Juryn skriver ett typmärkt lyftrecept per idé. Autopiloten ger det som uppgift åt avkomman och loggar om medaljen steg. Idépanelen jämför receptet per kriterium med syskonets och visar träffsäkerheten, som också viktar föräldra- och korstypsval."
+    }
+  ],
+  "filmLine": "The jury used to say \"11 out of 15, silver\" with total confidence. Now, when a verdict sits one point from a different medal, it asks a second judge who hasn't seen the first answer, and shows how far apart the two are.",
+  "tests": "✔ the hit-rate nudge breaks ties in selection but never beats a point of jury score (28.285042ms)\n✔ second opinion: only a jury sum exactly on a medal threshold is on the edge (0.087458ms)\n✔ second opinion: the band spans both sums and says whether the medals agree (0.101625ms)\n✔ second opinion: disagreement lowers the breeding score by half the gap, either way; agreement costs nothing (0.057834ms)\nℹ tests 78\nℹ suites 0\nℹ pass 78\nℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 4058.25625"
+}
