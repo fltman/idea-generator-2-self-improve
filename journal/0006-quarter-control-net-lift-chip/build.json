@@ -1,0 +1,74 @@
+{
+  "seq": 6,
+  "title": "Quarter Control Net-Lift Chip",
+  "pitch": "Smallest build: the autopilot breeds a no-recipe control sibling for every fourth recipe child. The panel shows one net-lift chip per recipe type (mean medal gain minus control gain, with n), and ties in tournament selection use it instead of raw hit rate.",
+  "status": "interrupted",
+  "trigger": "hand",
+  "branch": "build/0006-quarter-control-net-lift-chip",
+  "commit": null,
+  "summary": null,
+  "error": "The server restarted during the build",
+  "costUsd": 0,
+  "sessionId": null,
+  "createdAt": "2026-11-08 09:11:17",
+  "startedAt": "2026-11-08 09:17:06",
+  "finishedAt": "2026-11-08 09:17:06",
+  "jury": {
+    "originality": 4,
+    "feasibility": 4,
+    "impact": 3,
+    "reason": "A no-recipe control sibling turns the hit-rate into a causal net-lift measure, fixing regression-to-the-mean bias; but small n makes the chips noisy and costs extra spend."
+  },
+  "lineage": [
+    {
+      "kind": "combine",
+      "title": "Control-Adjusted Recipe Weights by Cross Type",
+      "pitch": "For autopilot operators: each recipe-bred child is re-judged blind to its recipe, beside a no-recipe sibling control. Only medal gain over control counts as a hit. These net lifts, split by recipe type and cross type, weight tournament selection and show in the panel."
+    },
+    {
+      "kind": "combine",
+      "title": "Lyftrecept som mäts och styr urvalet",
+      "pitch": "Juryn ger varje idé ett typmärkt lyftrecept (kriterium + typ, t.ex. \"skärp genomförbarhet\"). Nästa generation får receptet som uppgift, och autopilotens logg räknar hur ofta det lyfte en medalj. Idépanelen visar receptet, träffsäkerheten per receptyp och korstyp, och urvalet viktas efter den."
+    },
+    {
+      "kind": "expand",
+      "title": "Lift Attempt Re-Judge With Control",
+      "pitch": "After an offspring is built from a recipe, the jury re-scores it blind to the recipe and also re-scores a no-recipe sibling as control. Only the medal gain over the control counts as a hit, and the panel shows lift versus baseline."
+    },
+    {
+      "kind": "seed",
+      "title": "Jury says what would lift each idea one medal",
+      "pitch": "When the jury scores an idea, it should also say what would lift it one medal, and the next generation should try exactly that."
+    },
+    {
+      "kind": "combine",
+      "title": "Jämförbara lyftrecept med träffsäkerhet",
+      "pitch": "Juryn ger varje idé ett typmärkt lyftrecept. Idépanelen visar sida vid sida varför en idé slog en annan, per kriterium, plus recepttypens och korstypens träffsäkerhet från autopilotens logg. Urvalet viktas efter den träffsäkerheten."
+    },
+    {
+      "kind": "combine",
+      "title": "Lift Recipes Fed Back by Hit Rate",
+      "pitch": "The jury writes a typed one-medal lift recipe per idea. The autopilot hands it to the offspring as its task, then logs whether the medal rose. Parent and cross-type picks are weighted by each recipe type's hit rate, shown in the panel."
+    },
+    {
+      "kind": "seed",
+      "title": "People watching the board cannot tell why one idea won over another: make the jury’s reasoning visible and comparable.",
+      "pitch": ""
+    },
+    {
+      "kind": "combine",
+      "title": "Lyftrecept styr korstyper",
+      "pitch": "Juryn skriver för varje idé ett \"lyftrecept\": vilken enskild ändring som ger nästa medalj, märkt med en typ (t.ex. originalitet, genomförbarhet). Autopiloten loggar vilka korstyper och recept som faktiskt lyfte medaljen, viktar urvalet därefter och visar träffsäkerheten per korstyp i idépanelen."
+    },
+    {
+      "kind": "combine",
+      "title": "Lyftrecept med mätt träffsäkerhet",
+      "pitch": "Juryn skriver ett typmärkt lyftrecept per idé. Autopiloten ger det som uppgift åt avkomman, loggar om medaljen lyfte per recepttyp och korstyp, och viktar både föräldraval och korstyp efter träffsäkerheten, som visas i idépanelen."
+    },
+    {
+      "kind": "seed",
+      "title": "The autopilot should learn which kinds of crosses tend to produce gold on a board, and breed more of those.",
+      "pitch": ""
+    }
+  ]
+}
