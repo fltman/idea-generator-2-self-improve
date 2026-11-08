@@ -5,7 +5,7 @@
 // instead, expanding a strong idea that has not been expanded yet, which
 // brings new material into the pool.
 
-import { fitness, medal, CRITERIA, confidenceBand, scoreSum } from './score.js';
+import { fitness, medal, CRITERIA, confidenceBand, scoreSum, isJudged } from './score.js';
 
 export const pairKey = (a, b) => (a < b ? `${a}-${b}` : `${b}-${a}`);
 
@@ -578,4 +578,74 @@ export function wordingStats(ideas) {
     .slice(0, WORDING_TOP)
     .map(([keyword, r]) => ({ keyword, ...fin(r) }));
   return { ...fin(total), keywords };
+}
+
+// ---------------------------------------------------------------- spores
+// Ideas that spread between boards on their own, like spores: now and then the
+// autopilot sends a board's strongest unsent idea (silver or better) to the
+// spore board it fits best, judged by the keywords the two share. There it is
+// a guest, judged against that board's own goal; if it earns a medal it has
+// taken root, and it cross-breeds with the locals like any guest.
+
+/** Bred ideas on a board between two spores. */
+export const SPORE_EVERY = 10;
+/** The lowest medal a spore may carry (2 = silver). */
+export const SPORE_MIN_MEDAL = 2;
+
+/** Is the board due to release a spore? `lastSporeAt`: id of the newest home idea when the last spore left (0: never). */
+export function sporeDue(ideas, lastSporeAt = 0) {
+  return ideas.filter((i) => i.id > lastSporeAt && (i.kind === 'expand' || i.kind === 'combine')).length >= SPORE_EVERY;
+}
+
+/** The board's strongest idea that may leave: its own (not a guest), silver or better, not sent before. */
+export function pickSpore(ideas, sent = new Set()) {
+  let best = null;
+  for (const i of ideas) {
+    if (i.kind === 'guest' || sent.has(i.id) || medal(i) < SPORE_MIN_MEDAL) continue;
+    if (!best || fitness(i) > fitness(best) || (fitness(i) === fitness(best) && i.id < best.id)) best = i;
+  }
+  return best;
+}
+
+/**
+ * Where a spore lands: the candidate board sharing most of the spore's
+ * keywords with its own top keywords. A random draw under 1 breaks ties, so
+ * with no overlap anywhere it drifts to a random board (spores travel blind).
+ * @param {{keywords?: string[]}} idea
+ * @param {{id: number, keywords: string[]}[]} boards  candidates (other spore boards that do not have it yet)
+ * @returns {{boardId: number, shared: string[]} | null}
+ */
+export function sporeTarget(idea, boards, rng = Math.random) {
+  const mine = new Set((idea.keywords ?? []).map((k) => k.toLowerCase()));
+  let best = null;
+  for (const b of boards) {
+    const shared = b.keywords.filter((k) => mine.has(k.toLowerCase()));
+    const score = shared.length + rng() * 0.99;
+    if (!best || score > best.score) best = { boardId: b.id, shared, score };
+  }
+  return best && { boardId: best.boardId, shared: best.shared };
+}
+
+/** Has a spore taken root where it landed? Judged there and earned a medal (bronze or better). */
+export function sporeRooted(guest) {
+  return isJudged(guest) || guest.medalOverride != null ? medal(guest) >= 1 : null;
+}
+
+/**
+ * What spores did for a board: those it sent (`out`: guests on other boards
+ * whose origin is here) and those it took in (its own spore guests, with how
+ * many children each has bred here).
+ */
+export function sporeStats(out, ideas, edges = []) {
+  const count = (list) => ({
+    n: list.length,
+    judged: list.filter((g) => sporeRooted(g) !== null).length,
+    rooted: list.filter((g) => sporeRooted(g) === true).length,
+  });
+  const arrived = ideas.filter((i) => i.spore);
+  const kids = (id) => edges.filter((e) => e.from === id).length;
+  return {
+    sent: count(out),
+    arrived: { ...count(arrived), children: arrived.reduce((s, g) => s + kids(g.id), 0) },
+  };
 }

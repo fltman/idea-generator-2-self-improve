@@ -422,3 +422,7 @@ body.exhibit #seed-input { font-size: 20px; padding: 18px 22px; }
 .repo-focus { display: grid; gap: 8px; margin-bottom: 10px; }
 .repo-pick { align-items: flex-start; line-height: 1.35; }
 .repo-pick input { margin-top: 3px; }
+
+/* Spores */
+.spore-list { margin: 4px 0 0; padding-left: 0; list-style: none; font-size: 12px; }
+.spore-list li { margin: 2px 0; }

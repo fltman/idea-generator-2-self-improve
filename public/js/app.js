@@ -10,7 +10,7 @@ import {
   evolutionStats, liftStats, LIFT_TYPES, doubtPenalty, armOf, armHit, trialStats, trialVerdict, ARMS, TRIAL_MIN,
   diversity, diversitySeries, pressureStats, MONOCULTURE_SHARE, DIVERSITY_WINDOW, netLiftStats, CONTROL_EVERY,
   appliedStatus, appliedStats, APPLIED_STATUSES, duelHit, duelStats, STYLES, STYLE_MIN, styleStats,
-  plainGap, styleCarried, wordingStats, PLAIN_GAP,
+  plainGap, styleCarried, wordingStats, PLAIN_GAP, sporeStats, sporeRooted, SPORE_EVERY,
 } from './evolve.js';
 
 /** A net lift in medal steps, signed, two decimals: +0.33, −0.50, ±0.00. */
@@ -104,6 +104,7 @@ async function openBoard(id) {
   S.retrying = new Set(data.retrying ?? []);
   S.autopilot = data.autopilot;
   S.spentToday = data.spentToday;
+  S.spores = data.spores ?? [];
   S.selected = null;
   localStorage.setItem('ideagen.board', String(id));
   graph.setData(data.ideas, data.edges, data.judging);
@@ -181,6 +182,17 @@ function onEvent(e) {
     case 'spinoff':
       S.spinoffs.push({ ideaId: e.ideaId, boardId: e.boardId, title: e.title });
       renderPanelSoon();
+      break;
+    case 'spore':
+      // A strong idea left for another board, or one arrived here. Refresh the overview's spore card.
+      if (e.toBoardId) {
+        const to = S.boards.find((b) => b.id === e.toBoardId);
+        toast(t('sporeSent', { b: to?.title ?? '?' }), 'info');
+        api('GET', `/api/boards/${S.board.id}`).then((d) => { S.spores = d.spores ?? []; renderPanelSoon(); }).catch(() => {});
+      } else {
+        const from = S.boards.find((b) => b.id === e.fromBoardId);
+        toast(t('sporeArrived', { b: from?.title ?? '?' }), 'good');
+      }
       break;
     case 'build':
     case 'buildLog':
@@ -627,6 +639,25 @@ function styleOverview(ideas) {
   );
 }
 
+/**
+ * Overview: spores. Sent from here (where each landed and whether it took root)
+ * and taken in (how many rooted and how many children they bred here). null
+ * when the board has spores off and none ever came or went.
+ */
+function sporeOverview(ideas) {
+  const out = S.spores ?? [];
+  if (!S.board.config.spores && !out.length && !ideas.some((i) => i.spore)) return null;
+  const st = sporeStats(out, ideas, S.edges ?? []);
+  const mark = (g) => (sporeRooted(g) === true ? '🌱' : sporeRooted(g) === false ? '✗' : '…');
+  return h('div', { class: 'evo spore-overview' },
+    h('span', { class: 'muted', title: t('sporeHint', { n: SPORE_EVERY }) }, `🍄 ${t('sporeTitle')}`),
+    h('div', {}, t('sporeLine', { sent: st.sent.n, rootedOut: st.sent.rooted, judgedOut: st.sent.judged, arrived: st.arrived.n, rootedIn: st.arrived.rooted, kids: st.arrived.children })),
+    out.length ? h('ul', { class: 'spore-list' }, out.slice(-6).reverse().map((g) =>
+      h('li', {}, `${mark(g)} `, h('button', { class: 'linkish', onclick: () => openBoard(g.boardId) }, g.boardTitle ?? '?'), ` · ${g.title}`))) : null,
+    !S.board.config.spores ? h('small', { class: 'muted' }, t('sporeOff')) : null,
+  );
+}
+
 const DUEL_MARK = { child: '▲', parent: '▼', tie: '=' };
 
 /**
@@ -773,8 +804,9 @@ function renderIdea(idea) {
         : null,
     ),
     idea.kind === 'guest' && idea.originBoardId
-      ? h('button', { class: 'linkish', onclick: () => openBoard(idea.originBoardId) }, `↗ ${t('fromBoard', { b: idea.originBoardTitle ?? '?' })}`)
+      ? h('button', { class: 'linkish', onclick: () => openBoard(idea.originBoardId) }, `${idea.spore ? '🍄' : '↗'} ${t(idea.spore ? 'sporeFrom' : 'fromBoard', { b: idea.originBoardTitle ?? '?' })}`)
       : null,
+    idea.spore ? h('p', { class: 'small muted' }, t(sporeRooted(idea) === true ? 'sporeRootedYes' : sporeRooted(idea) === false ? 'sporeRootedNo' : 'sporeRootedWait')) : null,
     h('h2', {}, idea.title),
     idea.pitch ? h('p', { class: 'pitch' }, idea.pitch) : null,
     idea.sourceUrl ? h('a', { class: 'source', href: idea.sourceUrl, target: '_blank', rel: 'noopener noreferrer' }, `${t('source')} ↗`) : null,
@@ -897,6 +929,7 @@ function renderOverview() {
     diversityOverview(ideas),
     liftOverview(ideas),
     styleOverview(ideas),
+    sporeOverview(ideas),
     wordingOverview(ideas),
     h('section', { class: 'summary' },
       h('div', { class: 'row space' }, h('h3', {}, t('summary')),
@@ -1121,6 +1154,7 @@ async function boardSettingsDialog() {
   const autoProj = h('input', { type: 'checkbox', checked: c.autoProjectOnGold });
   const selfOn = h('input', { type: 'checkbox', checked: c.selfImprove });
   const wordingOn = h('input', { type: 'checkbox', checked: !!c.wordingGap });
+  const sporesOn = h('input', { type: 'checkbox', checked: !!c.spores });
   const buildsPerDay = inp(c.buildsPerDay, { type: 'number', min: 0, max: 50 });
   const buildModel = inp(c.buildModel, { placeholder: 'opus' });
   const xOn = h('input', { type: 'checkbox', checked: c.researchers.x.enabled }), xFocus = inp(c.researchers.x.focus, { placeholder: t('focusPh') });
@@ -1171,7 +1205,8 @@ async function boardSettingsDialog() {
       h('label', { class: 'check' }, rOn, t('researchScout')), field(t('focus'), rFocus)),
     h('fieldset', {}, h('legend', {}, t('autopilot')),
       field(t('mode'), mode), h('div', { class: 'grid3' }, field(t('pace'), pace), field(t('stepsPerHour'), sph), field(t('usdPerDay'), usd)),
-      h('small', { class: 'muted' }, t('rateNote'))),
+      h('small', { class: 'muted' }, t('rateNote')),
+      h('label', { class: 'check', title: t('sporeHint', { n: SPORE_EVERY }) }, sporesOn, `🍄 ${t('sporesOn')}`)),
     h('fieldset', {}, h('legend', {}, t('models')), h('small', { class: 'muted' }, t('modelsBoardNote')),
       h('div', { class: 'grid2' }, ROLES.map((r) => field(t(`role_${r}`), models[r])))),
     h('button', {
@@ -1197,7 +1232,7 @@ async function boardSettingsDialog() {
           title: title.value, goal: goal.value,
           config: {
             lang: lang.value, flowName: flowName.value, flow: { system: sys.value, expand: exp.value, combine: comb.value },
-            judgeGuidance: guidance.value, autoProjectOnGold: autoProj.checked, wordingGap: wordingOn.checked,
+            judgeGuidance: guidance.value, autoProjectOnGold: autoProj.checked, wordingGap: wordingOn.checked, spores: sporesOn.checked,
             selfImprove: selfOn.checked, buildsPerDay: Number(buildsPerDay.value), buildModel: buildModel.value,
             researchers: { x: { enabled: xOn.checked, focus: xFocus.value }, research: { enabled: rOn.checked, focus: rFocus.value } },
             mode: mode.value, autopilotSeconds: Number(pace.value), rate: { stepsPerHour: Number(sph.value), usdPerDay: Number(usd.value) },

@@ -198,6 +198,8 @@ export type BoardConfig = {
   autoProjectOnGold: boolean;
   /** Wording gap (build 0011): after each verdict the judge model rewrites the idea in plain wording and the jury prompt rescores the rewrite, blind. Measured, never used. */
   wordingGap: boolean;
+  /** Spores: the autopilot now and then sends a strong idea to the spore board where it fits best, and this board takes spores in. */
+  spores: boolean;
   /**
    * Self-improvement: ideas on this board are changes to this app. Prompts get
    * the app's current feature list, and gold ideas go to the Claude Code
@@ -251,6 +253,7 @@ export function defaultConfig(template = DEFAULT_TEMPLATES[0]): BoardConfig {
     rate: { stepsPerHour: 60, usdPerDay: 1 },
     autoProjectOnGold: true,
     wordingGap: false,
+    spores: false,
     selfImprove: false,
     buildsPerDay: 4,
     buildModel: 'opus',
@@ -302,6 +305,7 @@ export function mergeConfig(base: BoardConfig, raw: any): BoardConfig {
     },
     autoProjectOnGold: b(r.autoProjectOnGold, base.autoProjectOnGold),
     wordingGap: b(r.wordingGap, base.wordingGap),
+    spores: b(r.spores, base.spores ?? false),
     selfImprove: b(r.selfImprove, base.selfImprove),
     buildsPerDay: Number.isFinite(Number(r.buildsPerDay)) && r.buildsPerDay !== null && r.buildsPerDay !== ''
       ? Math.min(50, Math.max(0, Math.round(Number(r.buildsPerDay)))) : base.buildsPerDay,
@@ -352,6 +356,8 @@ export type Idea = {
   duel: Duel | null;
   /** Idea style (build 0010): the framing the breed was told to write in (STYLES in evolve.js). null: a seed, guest or older idea. */
   style: string | null;
+  /** Spores: a guest the autopilot sent here on its own (not announced by hand). */
+  spore: boolean;
   /** Wording gap (build 0011): the judge model's plain rewrite of this idea and the jury prompt's blind scores for it. The gap is the jury's sum minus the plain sum (plainGap() in evolve.js). null: not rescored. */
   plain: Plain | null;
   createdAt: string;
@@ -437,6 +443,7 @@ const ideaFromRow = (r: any): Idea => ({
   liftCheck: r.lift_check ?? null,
   duel: r.duel ? parseJson(r.duel) : null,
   style: r.style ?? null,
+  spore: !!r.spore,
   plain: r.plain ? parseJson(r.plain) : null,
   createdAt: r.created_at,
 });
@@ -486,7 +493,7 @@ export function openDb(file: string) {
   db.exec(SCHEMA);
   // Databases from before lift recipes: add the columns (SQLite has no ADD COLUMN IF NOT EXISTS).
   const ideaCols = new Set((db.prepare('PRAGMA table_info(ideas)').all() as any[]).map((c) => c.name));
-  for (const [name, type] of [['recipe_type', 'TEXT'], ['recipe', 'TEXT'], ['lift_type', 'TEXT'], ['lift_from', 'INTEGER'], ['lift_base', 'INTEGER'], ['retrial', 'TEXT'], ['lift_arm', 'TEXT'], ['escape_kw', 'TEXT'], ['lift_applied', 'INTEGER'], ['lift_check', 'TEXT'], ['duel', 'TEXT'], ['style', 'TEXT'], ['plain', 'TEXT']]) {
+  for (const [name, type] of [['recipe_type', 'TEXT'], ['recipe', 'TEXT'], ['lift_type', 'TEXT'], ['lift_from', 'INTEGER'], ['lift_base', 'INTEGER'], ['retrial', 'TEXT'], ['lift_arm', 'TEXT'], ['escape_kw', 'TEXT'], ['lift_applied', 'INTEGER'], ['lift_check', 'TEXT'], ['duel', 'TEXT'], ['style', 'TEXT'], ['plain', 'TEXT'], ['spore', 'INTEGER']]) {
     if (!ideaCols.has(name)) db.exec(`ALTER TABLE ideas ADD COLUMN ${name} ${type}`);
   }
 
@@ -586,18 +593,19 @@ export function openDb(file: string) {
         lift?: { type: string | null; from: number; base: number; arm?: string } | null;
         escape?: string | null;
         style?: string | null;
+        spore?: boolean;
       },
       parentIds: number[] = [],
     ): Idea {
       return tx(() => {
         const { lastInsertRowid } = db
           .prepare(
-            `INSERT INTO ideas (board_id, title, pitch, kind, source_url, x, y, generation, origin_idea_id, origin_board_id, lift_type, lift_from, lift_base, lift_arm, escape_kw, style)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            `INSERT INTO ideas (board_id, title, pitch, kind, source_url, x, y, generation, origin_idea_id, origin_board_id, lift_type, lift_from, lift_base, lift_arm, escape_kw, style, spore)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           )
           .run(
             i.boardId, i.title, i.pitch, i.kind, i.sourceUrl ?? null, i.x, i.y, i.generation, i.originIdeaId ?? null, i.originBoardId ?? null,
-            i.lift?.type ?? null, i.lift?.from ?? null, i.lift?.base ?? null, i.lift?.arm ?? null, i.escape ?? null, i.style ?? null,
+            i.lift?.type ?? null, i.lift?.from ?? null, i.lift?.base ?? null, i.lift?.arm ?? null, i.escape ?? null, i.style ?? null, i.spore ? 1 : null,
           );
         const id = Number(lastInsertRowid);
         const edge = db.prepare('INSERT OR IGNORE INTO edges (board_id, from_id, to_id) VALUES (?, ?, ?)');
@@ -645,6 +653,20 @@ export function openDb(file: string) {
       return repo.getIdea(id);
     },
     /** The keywords in use, most common first, so the judge can reuse them. */
+    /** Spores: the guests the autopilot sent out from this board, with where they landed and how they were judged there. */
+    sporesFrom(boardId: number) {
+      return (db.prepare(`${IDEA_SELECT} WHERE i.origin_board_id = ? AND i.spore = 1 ORDER BY i.id`).all(boardId) as any[]).map((r) => ({
+        ...ideaFromRow(r),
+        boardTitle: (db.prepare('SELECT title FROM boards WHERE id = ?').get(r.board_id) as any)?.title ?? null,
+      }));
+    },
+    /** A board's own keywords, most frequent first: what the board is about, for picking where a spore lands. */
+    boardKeywords(boardId: number, limit = 20): string[] {
+      return db
+        .prepare('SELECT k.keyword, COUNT(*) AS n FROM idea_keywords k JOIN ideas i ON i.id = k.idea_id WHERE i.board_id = ? GROUP BY k.keyword ORDER BY n DESC, k.keyword LIMIT ?')
+        .all(boardId, limit)
+        .map((r: any) => r.keyword);
+    },
     keywordVocabulary(limit = 80): string[] {
       return db
         .prepare('SELECT keyword, COUNT(*) AS n FROM idea_keywords GROUP BY keyword ORDER BY n DESC, keyword LIMIT ?')

@@ -248,6 +248,7 @@ export function createHandler({ repo, engine, autopilot, runtime, publicDir, bui
         retrying: ideas.filter((i) => engine.retrying.has(i.id)).map((i) => i.id),
         autopilot: autopilot.status(board.id),
         spentToday: repo.spentOn(board.id),
+        spores: repo.sporesFrom(board.id).map((g) => ({ id: g.id, originIdeaId: g.originIdeaId, boardId: g.boardId, boardTitle: g.boardTitle, title: g.title, originality: g.originality, feasibility: g.feasibility, impact: g.impact, medalOverride: g.medalOverride })),
       };
     }],
     // ---- codebase boards: analyse a local folder, then create a board from the picked directions

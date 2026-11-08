@@ -14,7 +14,7 @@ import { slugify, writeBrief, writeProject } from './project.ts';
 import { RepoError, scanRepo, scanText, shortPath } from './reposcan.ts';
 import { ProviderError, type AppSettings, type ChatFn, type Role } from './providers.ts';
 import { fitness, isJudged, medal, scoreSum, onMedalEdge, goldGate } from '../public/js/score.js';
-import { nextMove, assignArm, liftStats, armOf, controlDue, drawStyle } from '../public/js/evolve.js';
+import { nextMove, assignArm, liftStats, armOf, controlDue, drawStyle, sporeDue, pickSpore, sporeTarget } from '../public/js/evolve.js';
 
 export class AppError extends Error {
   status: number;
@@ -87,6 +87,8 @@ type Deps = {
   duelRng?: () => number;
   /** Idea styles: the lot that picks each breed's style. Its own rng, so the arm and duel draws stay as they were (tests fix it). */
   styleRng?: () => number;
+  /** Spores: the draw that breaks ties between equally fitting target boards (tests fix it). */
+  sporeRng?: () => number;
   /** Codebase boards: the folder gold logs go to unless a board names its own file (default data/gold). */
   goldRoot?: string;
 };
@@ -100,6 +102,7 @@ export function createEngine(deps: Deps) {
   const trialRng = deps.trialRng ?? Math.random;
   const duelRng = deps.duelRng ?? Math.random;
   const styleRng = deps.styleRng ?? Math.random;
+  const sporeRng = deps.sporeRng ?? Math.random;
   const bus = createBus();
   const judging = new Set<number>();
 
@@ -138,6 +141,42 @@ export function createEngine(deps: Deps) {
     return ctx ? { ...board.config.flow, system: `${board.config.flow.system}\n\n${ctx}` } : board.config.flow;
   };
   const guidanceFor = (board: Board) => [board.config.judgeGuidance, extraCtx(board)].filter((x) => x.trim()).join('\n\n');
+
+  /** A guest copy of an idea on another board, beside what is already there. */
+  function landGuest(boardId: number, idea: Idea, originIdeaId: number, originBoardId: number | null, spore: boolean) {
+    const at = besideBoard(repo.listIdeas(boardId));
+    return repo.insertIdea({
+      boardId, title: idea.title, pitch: idea.pitch, kind: 'guest', sourceUrl: idea.sourceUrl,
+      x: at.x, y: at.y, generation: 0, originIdeaId, originBoardId, spore,
+    });
+  }
+
+  /**
+   * Spores: after an autopilot step on a spore board, every SPORE_EVERY bred
+   * ideas it sends its strongest unsent idea (silver or better) to the other
+   * spore board whose keywords it shares most. There it is a guest, judged
+   * against that board's goal. Returns the guest, or null when nothing went.
+   */
+  async function maybeSpore(boardId: number) {
+    const board = repo.getBoard(boardId);
+    if (!board?.config.spores) return null;
+    const out = repo.sporesFrom(boardId);
+    const ideas = repo.listIdeas(boardId);
+    if (!sporeDue(ideas, out.reduce((m, g) => Math.max(m, g.id), 0))) return null;
+    const spore = pickSpore(ideas, new Set(out.map((g) => g.originIdeaId)));
+    if (!spore) return null;
+    const candidates = repo.listBoards()
+      .filter((b) => b.id !== boardId && b.config.spores && !repo.hasGuest(b.id, spore.id))
+      .map((b) => ({ id: b.id, keywords: repo.boardKeywords(b.id) }));
+    const target = sporeTarget(spore, candidates, sporeRng);
+    if (!target) return null;
+    const guest = landGuest(target.boardId, spore, spore.id, boardId, true);
+    emitIdeas(target.boardId, [guest]);
+    bus.emit(boardId, { type: 'spore', ideaId: spore.id, toBoardId: target.boardId, guestId: guest.id, shared: target.shared });
+    bus.emit(target.boardId, { type: 'spore', ideaId: guest.id, fromBoardId: boardId, shared: target.shared });
+    queueJudge([guest.id]);
+    return { guest, shared: target.shared };
+  }
 
   /**
    * Codebase boards: append a gold idea to the board's gold file (Markdown), once
@@ -608,11 +647,7 @@ export function createEngine(deps: Deps) {
           skipped.push(boardId);
           continue;
         }
-        const at = besideBoard(repo.listIdeas(boardId));
-        const guest = repo.insertIdea({
-          boardId, title: idea.title, pitch: idea.pitch, kind: 'guest', sourceUrl: idea.sourceUrl,
-          x: at.x, y: at.y, generation: 0, originIdeaId, originBoardId,
-        });
+        const guest = landGuest(boardId, idea, originIdeaId, originBoardId, false);
         guests.push({ boardId, idea: guest });
         emitIdeas(boardId, [guest]);
       }
@@ -811,7 +846,16 @@ export function createEngine(deps: Deps) {
      * (diversity() in evolve.js) one parent comes from outside it, and the
      * children store the escaped keyword in `escape`.
      */
-    async autoStep(boardId: number): Promise<{ did: 'idle' | 'judge' | 'expand' | 'combine'; reason?: string; ids?: number[] }> {
+    /** One autopilot step, then (on a spore board, when due) a spore. A failed spore never fails the step. */
+    async autoStep(boardId: number) {
+      const r = await api.breedStep(boardId);
+      if (r.did !== 'idle') await maybeSpore(boardId).catch((e) => console.log(`[spore] board ${boardId}: ${e?.message ?? e}`));
+      return r;
+    },
+
+    maybeSpore,
+
+    async breedStep(boardId: number): Promise<{ did: 'idle' | 'judge' | 'expand' | 'combine'; reason?: string; ids?: number[] }> {
       mustBoard(boardId);
       const ideas = repo.listIdeas(boardId);
       if (!ideas.length) return { did: 'idle', reason: 'empty' };
