@@ -7,8 +7,9 @@
 //   --seed "…"           a seed idea, repeatable; replaces the default seeds
 //   --usd N              the board's dollar limit per day (default 5)
 //   --retire             switch the autopilot off on the other self-improvement boards
-//   --focus users|ops    aim the goal, jury and research at what users notice, or at cost,
-//                        speed and robustness, instead of the evolution and the jury (default: evolution)
+//   --focus users|ops|wild  aim the goal, jury and research at what users notice, at cost,
+//                        speed and robustness, or at wild ideas (which never build there),
+//                        instead of the evolution and the jury (default: evolution)
 //   --spores             turn spores on: the autopilot trades its best ideas with other spore boards
 // A fresh board is how you restart the loop after many builds: the old board's
 // pool was bred before those builds existed and keeps proposing them again.
@@ -74,6 +75,19 @@ const FOCUS = {
     ],
     wordingGap: false,
   },
+  wild: {
+    goal: 'Find wild, out-of-the-box changes to Idea Generator 2: ideas that would change what an idea generator is, not just tune this one. Surprising mechanisms, odd analogies, new kinds of boards, players or inputs. Every idea still names a concrete change to this app that Claude Code could build, so that a tamer board can take it in as a spore. This board never builds its own gold.',
+    impact: 'IMPACT here means how far the idea would change what the app is or can do. A safe, incremental improvement scores at most 2, however useful. ORIGINALITY 5 is for something no idea tool does; a twist on a known feature scores at most 3.',
+    research: 'computational creativity, open-endedness, novelty search, unusual human-AI co-creation',
+    seeds: [
+      'Two boards argue: each sends its best idea to the other, whose jury must attack it, and the survivors are crossed.',
+      'The board dreams at night: while nobody watches, it recombines its rejected ideas only, and shows the morning the best of the scrap heap.',
+      'Ideas age and die: every idea has a lifespan, and only one that has bred a medal-winning child lives on.',
+      'A visitor hums, draws or photographs something, and the board turns it into its next seed.',
+    ],
+    wordingGap: false,
+    builds: 0, // wild gold never builds here; it has to take root on a tamer board first
+  },
 } as const;
 const focusName = (arg('--focus') ?? 'evolution') as keyof typeof FOCUS;
 const F = FOCUS[focusName];
@@ -108,7 +122,7 @@ await api('PATCH', `/api/boards/${board.id}`, {
     autoProjectOnGold: false,
     wordingGap: F.wordingGap,
     spores: has('--spores'),
-    buildsPerDay: 4,
+    buildsPerDay: 'builds' in F ? F.builds : 4,
     buildModel: 'opus',
     judgeGuidance: JURY,
     researchers: {
