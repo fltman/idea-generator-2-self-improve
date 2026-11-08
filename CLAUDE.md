@@ -57,9 +57,14 @@ This fork improves itself. A self-improvement board generates changes to this ap
 
 ## Measured
 
-- **Calibration is due.** Build 0001 (2026-11-08) added `liftType` and `lift` to the judge's schema, after the scores, and raised its `maxTokens` to 600. The figures below were measured before that; re-run `npm run calibrate` (the build agent cannot: it costs money and is outside its allowlist).
+- **`claudecode:sonnet` judge after build 0001** (2026-11-08; adds `liftType` and `lift` after the scores, `maxTokens` 600):
+  - weak ideas: mean 5.2, max 8 (no medal)
+  - strong ideas: mean 9.6, 0 of 10 gold
+  - run-to-run spread 1
+  - $0.13
+  - PASS
 
-- **`claudecode:sonnet` judge** (2026-11-08):
+- **`claudecode:sonnet` judge before build 0001** (2026-11-08):
   - weak ideas: mean 4.9, max 7 (no medal)
   - strong ideas: mean 9.5, 0 of 10 gold
   - run-to-run spread 1
