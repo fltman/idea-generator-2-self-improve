@@ -43,7 +43,7 @@ This fork improves itself. A self-improvement board generates changes to this ap
 
 - **The medal comes from code, not the model:** a sum of three 1–5 scores, bronze from 9, silver from 11, gold from 13 (`score.js`). Left uncalibrated, an LLM jury gave 3/3 to the bare word "fire"; the calibration test keeps that from happening here.
 - **The lift-recipe nudge stays below one point.** `breedScore()` adds the hit rate minus 0.5 (Laplace-smoothed, so strictly within ±0.5) to fitness. It may only reorder ideas the jury scored the same; the jury's score stays what selection rests on.
-- **The second judge never changes the medal.** `confidenceBand()` (`score.js`) only shows the band; `doubtPenalty()` (`evolve.js`) subtracts half the gap between the two sums from `breedScore()`, and nothing for a hand-set medal. The second judge must stay blind: never pass it the jury's scores or reason. The `retrial` model is not calibrated; if you change it, run `npm run calibrate -- --model <it>` first.
+- **The second judge never changes the medal.** `confidenceBand()` (`score.js`) only shows the band; `doubtPenalty()` (`evolve.js`) subtracts half the gap between the two sums from `breedScore()`, and nothing for a hand-set medal. The second judge must stay blind: never pass it the jury's scores or reason. The `retrial` model (`claudecode:opus`) passed calibration on 2026-11-08 (see Measured). If you change it, run `npm run calibrate -- --model <it>` first.
 - **Never put integer `minimum`/`maximum` in a JSON schema.** Anthropic rejects them. Put the range in the description and clamp in code.
 - **Anthropic native: send no `temperature`.** API version 2026-10-21 rejects it. Use effort `low`. The SDK sends the key as a Bearer token.
 - **OpenRouter: send `reasoning:{enabled:false}`** and retry without it on a 400 that mentions reasoning (some models insist on reasoning).
@@ -58,6 +58,14 @@ This fork improves itself. A self-improvement board generates changes to this ap
 - **Project folders never overwrite.** They are created with a non-recursive `mkdir`, and a taken name gets `-2`.
 
 ## Measured
+
+- **`claudecode:opus` as second judge (retrial)** (2026-11-08, after build 0002):
+  - weak ideas: mean 4.8, max 5 (no medal)
+  - strong ideas: mean 9.8, 0 of 10 gold
+  - run-to-run spread 0
+  - $0.31 for 22 calls
+  - PASS
+  - It scores about like Sonnet, so the band measures disagreement, not a constant offset.
 
 - **`claudecode:sonnet` judge after build 0001** (2026-11-08; adds `liftType` and `lift` after the scores, `maxTokens` 600):
   - weak ideas: mean 5.2, max 8 (no medal)
