@@ -27,6 +27,7 @@ This fork improves itself. A self-improvement board generates changes to this ap
 - `server/builder.ts` – the self-improvement builder:
   - queue, worktree, the agent run (stream-json), verification, merge and the journal
   - `selfContext()`: the README feature list plus the merged builds, added to every prompt on self-improvement boards
+- `server/camera.ts` – the progress camera: screenshots of the live board go to `progress/` (gitignored). It shoots on a timer and at every gold idea, build and restart, and keeps `latest.png` and a `README.md` log. It uses `?camera` so the headless browser never pushes settings.
 - `journal/` – one folder per build (`NNNN-slug/`: the agent's README.md, screenshots, build.json) and `INDEX.md`. Committed and public.
 - `data/worktrees/`, `data/builds/` – live worktrees, and each build's log.txt and full transcript.jsonl. Gitignored.
 - `server/db.ts` – SQLite (`node:sqlite`), plus `report()` and `dashboard()` queries.

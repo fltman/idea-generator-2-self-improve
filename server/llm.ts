@@ -11,7 +11,8 @@ export type { ChatFn, ChatRequest } from './providers.ts';
 export type Lang = 'sv' | 'en';
 type Pitch = { title: string; pitch: string };
 type Flow = { system: string; expand: string; combine: string };
-type BoardCtx = { goal: string };
+/** fixedLang: write in this language whatever the sources are in (self-improvement boards: the code and journal follow the board). */
+type BoardCtx = { goal: string; fixedLang?: Lang };
 export type Judgement = { originality: number; feasibility: number; impact: number; reason: string; keywords: string[] };
 
 /** One canonical form so "Public Spaces" and "public space" count as one trend. */
@@ -67,7 +68,8 @@ const JUDGE_SCHEMA = {
 
 const LANG_NAME: Record<Lang, string> = { sv: 'Swedish', en: 'English' };
 
-function languageRule(lang: Lang) {
+function languageRule(lang: Lang, fixed?: Lang) {
+  if (fixed) return `Write in ${LANG_NAME[fixed]}, even when the source ideas are in another language.`;
   return [
     `Write in the same language as the source idea(s). If that is unclear or mixed, write in ${LANG_NAME[lang]}.`,
     'If you write Swedish, write idiomatic Swedish: correct agreement, no invented compound words, no anglicisms where a Swedish word exists.',
@@ -198,7 +200,7 @@ export function makeLLM(chat: ChatFn) {
         a.flow.expand,
         `The concept:\n${fmtIdea(a.idea)}`,
         context(a.board, a.existingTitles),
-        languageRule(a.lang),
+        languageRule(a.lang, a.board.fixedLang),
       ]
         .filter(Boolean)
         .join('\n\n');
@@ -214,7 +216,7 @@ export function makeLLM(chat: ChatFn) {
         `Idea 1:\n${fmtIdea(a.a)}`,
         `Idea 2:\n${fmtIdea(a.b)}`,
         context(a.board, a.existingTitles),
-        languageRule(a.lang),
+        languageRule(a.lang, a.board.fixedLang),
       ]
         .filter(Boolean)
         .join('\n\n');
@@ -231,7 +233,7 @@ export function makeLLM(chat: ChatFn) {
         a.url ? `Source: ${a.url}` : '',
         `---\n${a.text}\n---`,
         context(a.board, []),
-        languageRule(a.lang),
+        languageRule(a.lang, a.board.fixedLang),
       ]
         .filter(Boolean)
         .join('\n\n');
@@ -333,7 +335,7 @@ export function makeLLM(chat: ChatFn) {
       const user = [
         a.board.goal.trim() ? `The board's goal (the general direction): ${a.board.goal.trim()}` : '',
         `The idea:\n${fmtIdea(a.idea)}`,
-        `Write the reason in the language of the idea; if unclear, in ${LANG_NAME[a.lang]}.`,
+        a.board.fixedLang ? `Write the reason in ${LANG_NAME[a.board.fixedLang]}.` : `Write the reason in the language of the idea; if unclear, in ${LANG_NAME[a.lang]}.`,
         a.vocabulary?.length ? `Keyword vocabulary in use (reuse when one fits): ${a.vocabulary.join(', ')}` : '',
       ]
         .filter(Boolean)

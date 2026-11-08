@@ -23,6 +23,7 @@ seed → branch / cross (claudecode:sonnet) → jury (calibrated, claudecode:son
 - **Verified by the server, not the agent.** The builder re-runs the tests and boots the server from the worktree before it merges. A failing build keeps its branch (`build/NNNN-slug`) and still gets its journal entry in `main`.
 - **Scoped agent.** The agent runs with `--permission-mode acceptEdits` and an explicit tool allowlist: file edits in its worktree, `npm test`, `node tools/shoot.ts`, and local git (add, commit, diff, log). Everything else is denied automatically, including push, checkout, reset, merge, rm, curl, npm install and web access. Running the tests does run code the agent wrote, so the worktree and the jury gate are the boundary, as in any CI.
 - **Not pushed by default.** Merges stay local until you push. Set `BUILD_PUSH=1` to push `main` after each merge.
+- **Progress camera.** The server screenshots the live board into `progress/` (gitignored): every 10 minutes (`CAMERA_MINUTES`, `CAMERA=0` turns it off), at every gold idea, when a build starts or ends, and after every restart, which includes right after a merge. `progress/latest.png` is always the newest picture, and `progress/README.md` logs every one inline, so you can follow along in any Markdown viewer and later cut it into a timelapse.
 - **Live.** A ticker in the corner streams what the agent is doing (reads, edits, commands, its own remarks). 🔨 **Builds** in the top bar shows every build with its summary, cost, screenshots, journal and full log.
 
 ## What it does
@@ -79,6 +80,7 @@ All app settings live in the browser (localStorage), including API keys, models 
 | `BUILD_PUSH` | off | `1` pushes `main` after each merged build |
 | `BUILD_MAX_USD` | 15 | budget per build (`claude --max-budget-usd`) |
 | `CLAUDE_BIN` | `claude` | the CLI the builder runs |
+| `CAMERA_MINUTES`, `CAMERA` | 10, on | timelapse interval for `progress/`; `CAMERA=0` turns the camera off |
 | `IDEAGEN_NO_BUILDER`, `IDEAGEN_NO_AUTOPILOT` | off | `1` turns them off (screenshots and boot checks do this) |
 
 The server listens on 127.0.0.1 only. There is no login, and keys pass through it, so **do not expose it** as is.

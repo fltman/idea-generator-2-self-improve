@@ -19,6 +19,9 @@ const S = {
   version: null,
 };
 const fail = (e) => toast(errorText(e), 'error', 8000);
+// ?camera: the server's progress camera is looking. It must never push its blank settings over yours.
+const CAMERA = new URLSearchParams(location.search).has('camera');
+const push = (s) => (CAMERA ? api('GET', '/api/providers') : pushSettings(s));
 /** Built-in template names are bilingual ("Uppfinnaren · Inventor"); show the half that matches the UI. */
 const localName = (name) => {
   const m = /^(.+?) · (.+)$/.exec(name);
@@ -110,7 +113,7 @@ function onEvent(e) {
       }
       S.version ??= e.version;
       // The server restarted and lost the settings it only keeps in memory: hand them over again.
-      if (!e.settingsReceived) pushSettings(S.settings).then((p) => (S.providers = p)).catch(fail);
+      if (!e.settingsReceived) push(S.settings).then((p) => (S.providers = p)).catch(fail);
       break;
     case 'ideas':
       for (const idea of e.ideas) {
@@ -967,8 +970,8 @@ async function main() {
   wire();
   applyI18n();
   try {
-    S.providers = await pushSettings(S.settings);
-    warnMissingKeys();
+    S.providers = await push(S.settings);
+    if (!CAMERA) warnMissingKeys();
   } catch (e) {
     fail(e);
   }

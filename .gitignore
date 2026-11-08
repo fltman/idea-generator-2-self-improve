@@ -9,3 +9,5 @@ vault/
 .obsidian/
 # Demo video work files (large; not for the repo)
 demo/
+# Screenshots of the live app (server/camera.ts); local only, can grow large
+progress/

@@ -103,12 +103,10 @@ export function createEngine(deps: Deps) {
   const modelFor = (board: Board, role: Role) => board.config.models[role] || deps.settings().models[role];
   // On a self-improvement board the ideas are changes to this app, so every
   // prompt (and the jury) gets to know the app as it is right now.
-  // The board's language wins over the source ideas' here: one Swedish slip would
-  // otherwise breed a Swedish lineage, and the code and journal follow the board.
-  const selfCtx = (board: Board) =>
-    board.config.selfImprove && deps.selfContext
-      ? `${deps.selfContext()}\n\nWrite every title, pitch and reason in ${board.config.lang === 'sv' ? 'Swedish' : 'English'}, even when the source ideas are in another language.`
-      : '';
+  const selfCtx = (board: Board) => (board.config.selfImprove && deps.selfContext ? deps.selfContext() : '');
+  // The board's language wins over the source ideas' on self-improvement boards: one
+  // Swedish slip would otherwise breed a Swedish lineage, and the code and journal follow the board.
+  const ctxOf = (board: Board) => ({ goal: board.goal, fixedLang: board.config.selfImprove ? board.config.lang : undefined });
   const flowFor = (board: Board) => {
     const ctx = selfCtx(board);
     return ctx ? { ...board.config.flow, system: `${board.config.flow.system}\n\n${ctx}` } : board.config.flow;
@@ -160,7 +158,7 @@ export function createEngine(deps: Deps) {
     try {
       const { judgement } = await call(board.id, () =>
         llm.judge({
-          model: modelFor(board, 'judge'), board, idea, lang: board.config.lang,
+          model: modelFor(board, 'judge'), board: ctxOf(board), idea, lang: board.config.lang,
           guidance: guidanceFor(board), vocabulary: repo.keywordVocabulary(),
         }),
       );
@@ -223,7 +221,7 @@ export function createEngine(deps: Deps) {
     const parent = mustIdea(parentId);
     const board = mustBoard(parent.boardId);
     const { ideas } = await call(board.id, () =>
-      llm.expand({ model: modelFor(board, 'expand'), flow: flowFor(board), board, idea: parent, existingTitles: titles(board.id), lang: board.config.lang }),
+      llm.expand({ model: modelFor(board, 'expand'), flow: flowFor(board), board: ctxOf(board), idea: parent, existingTitles: titles(board.id), lang: board.config.lang }),
     );
     const spots = arcPositions(parent, repo.parentsOf(parent.id)[0] ?? null, ideas.length);
     const created = ideas.map((i, n) =>
@@ -242,7 +240,7 @@ export function createEngine(deps: Deps) {
     const c = mustIdea(bId);
     if (a.boardId !== board.id || c.boardId !== board.id) throw new AppError(400, 'bad_pair', 'Ideas belong to another board');
     const { idea } = await call(board.id, () =>
-      llm.combine({ model: modelFor(board, 'combine'), flow: flowFor(board), board, a, b: c, existingTitles: titles(board.id), lang: board.config.lang }),
+      llm.combine({ model: modelFor(board, 'combine'), flow: flowFor(board), board: ctxOf(board), a, b: c, existingTitles: titles(board.id), lang: board.config.lang }),
     );
     const dx = c.x - a.x, dy = c.y - a.y, len = Math.hypot(dx, dy) || 1; // midpoint, nudged off the line
     const created = repo.insertIdea(
@@ -285,12 +283,12 @@ export function createEngine(deps: Deps) {
         }
         if (page.text.length < 80) throw new AppError(422, 'url_no_text', `${url}: too little readable text`);
         const { idea } = await call(board.id, () =>
-          llm.distill({ model: modelFor(board, 'distill'), flow, board, text: [page.title, page.text].filter(Boolean).join('\n\n'), url, lang }),
+          llm.distill({ model: modelFor(board, 'distill'), flow, board: ctxOf(board), text: [page.title, page.text].filter(Boolean).join('\n\n'), url, lang }),
         );
         ({ title, pitch } = idea);
         sourceUrl = url;
       } else if (text.length > 120) { // longer than a title: distill it, never cut it off
-        const { idea } = await call(board.id, () => llm.distill({ model: modelFor(board, 'distill'), flow, board, text, lang }));
+        const { idea } = await call(board.id, () => llm.distill({ model: modelFor(board, 'distill'), flow, board: ctxOf(board), text, lang }));
         ({ title, pitch } = idea);
       }
       const num = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : 0);
