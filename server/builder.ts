@@ -49,6 +49,8 @@ type Deps = {
 };
 
 const ACTIVE_LOG = 400;
+/** Paths a build may never commit: the linked node_modules and the live data (database, worktrees, logs). */
+const FORBIDDEN = ['node_modules', 'data'];
 const pad = (n: number) => String(n).padStart(4, '0');
 const now = () => new Date().toISOString().replace('T', ' ').slice(0, 19);
 
@@ -257,6 +259,21 @@ export function createBuilder(deps: Deps) {
     deps.emit({ type: 'buildLog', id, lines });
   }
 
+  /**
+   * Ignore node_modules and data in every worktree, symlinks included (".gitignore"'s
+   * "node_modules/" only matches directories), so not even the agent's own `git add -A` takes them.
+   */
+  async function excludeForbidden() {
+    const common = await git(root, 'rev-parse', '--path-format=absolute', '--git-common-dir');
+    const file = join(common, 'info', 'exclude');
+    let text = '';
+    try { text = readFileSync(file, 'utf8'); } catch { /* none yet */ }
+    const missing = FORBIDDEN.map((f) => `/${f}`).filter((l) => !text.split('\n').includes(l));
+    if (!missing.length) return;
+    mkdirSync(join(common, 'info'), { recursive: true });
+    appendFileSync(file, `${text && !text.endsWith('\n') ? '\n' : ''}# idea-generator builder: never commit these from a build\n${missing.join('\n')}\n`);
+  }
+
   function nextSeq() {
     const fromJournal = journalEntries(root).map((j) => j.seq);
     const fromDb = repo.listBuilds(1000).map((b) => b.seq ?? 0);
@@ -412,6 +429,7 @@ export function createBuilder(deps: Deps) {
       mkdirSync(join(root, 'data', 'worktrees'), { recursive: true });
       await git(root, 'worktree', 'add', '-q', '-b', branch, wt, base);
       created = true;
+      await excludeForbidden();
       if (existsSync(join(root, 'node_modules'))) symlinkSync(join(root, 'node_modules'), join(wt, 'node_modules'), 'dir');
       mkdirSync(join(wt, 'data'), { recursive: true });
       repo.snapshot(join(wt, 'data', 'ideas.db'));
@@ -446,6 +464,10 @@ export function createBuilder(deps: Deps) {
         await git(wt, 'add', '-A');
         await git(wt, 'commit', '-q', '-m', `Build ${pad(seq)}: uncommitted changes from the agent`);
       }
+      // Build 0001 merged its node_modules symlink into main and took the live server down. Never again.
+      const touched = (await git(wt, 'diff', '--name-only', `${base}..HEAD`)).split('\n').filter(Boolean);
+      const bad = touched.filter((f) => FORBIDDEN.some((x) => f === x || f.startsWith(x + '/')));
+      if (bad.length) return await finish(b, wt, 'failed', { error: `The branch touches files a build must never commit: ${bad.slice(0, 5).join(', ')}` });
       if (Number(await git(wt, 'rev-list', '--count', `${base}..HEAD`)) === 0) return await finish(b, wt, 'failed', { error: 'The agent committed no changes' });
       const head = await git(root, 'rev-parse', mainBranch);
       if (head !== base) {

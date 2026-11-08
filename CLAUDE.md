@@ -7,7 +7,7 @@ This fork improves itself. A self-improvement board generates changes to this ap
 ## Commands
 
 - `npm run dev` – server on http://localhost:8301 that restarts when `server/` changes. A merged build relies on this. (`npm start` does not restart.) `PORT`, `HOST` and `DB_FILE` override.
-- `npm test` – 71 tests (`node --test`), with a fake LLM, fake provider servers, a fake `claude` CLI and a fake build agent. No network.
+- `npm test` – 73 tests (`node --test`), with a fake LLM, fake provider servers, a fake `claude` CLI and a fake build agent. No network.
 - `npm run self:setup` – creates the self-improvement board on a running server.
 - `node tools/shoot.ts --out file.png [--board N] [--eval js]…` – boots this checkout's server against a copy of `data/ideas.db` (autopilot and builder off), opens headless Chrome, and saves a PNG. `--help` lists the options.
 - `npm run calibrate [-- --model provider:model]` – real judge against weak and strong reference ideas. It costs money. **Re-run it whenever the judge's prompt, schema or model changes.**
@@ -51,7 +51,7 @@ This fork improves itself. A self-improvement board generates changes to this ap
 - **Text goes into the DOM as text nodes, never `innerHTML`** (`dom.js`). Ideas are written by models and by visitors.
 - **Builds are verified by the server, never by the agent's word.** The builder re-runs `npm test` and boots `server/index.ts` from the worktree, and merges with `--no-ff` only after both pass. The journal is committed on the branch before the merge, because the merge restarts the server under `npm run dev`; nothing that matters may come after it.
 - **The build agent is scoped.** It runs `--permission-mode acceptEdits` with an allowlist (`AGENT_ALLOWED` in builder.ts): edits, `npm test`, `node tools/shoot.ts`, and local git add/commit/diff/log. It may not push, checkout, reset, merge, rm, curl, `npm install`, or use the web. Never run it with `--dangerously-skip-permissions`.
-- **No new npm dependencies.** The worktree's `node_modules` is a symlink to the main one.
+- **No new npm dependencies.** The worktree's `node_modules` is a symlink to the main one. **A build never commits `node_modules` or `data/`.** Build 0001 merged that symlink and took the live server down (a trailing slash in `.gitignore` does not match a symlink). The builder now writes both into `info/exclude` and refuses any branch that touches them.
 - **Anything started inside a worktree gets `IDEAGEN_NO_AUTOPILOT=1 IDEAGEN_NO_BUILDER=1`** and never the live `PORT` or `DB_FILE`.
 - **Project folders never overwrite.** They are created with a non-recursive `mkdir`, and a taken name gets `-2`.
 

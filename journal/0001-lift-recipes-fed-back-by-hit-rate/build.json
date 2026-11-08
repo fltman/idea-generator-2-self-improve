@@ -5,7 +5,7 @@
   "status": "merged",
   "trigger": "hand",
   "branch": "build/0001-lift-recipes-fed-back-by-hit-rate",
-  "commit": null,
+  "commit": "8f4bfb5",
   "summary": "The jury now writes a lift recipe for every idea: one change that would earn the next medal, tagged with one of the three criteria. Children get it as their task in the branch or cross prompt and store their parent's medal, so the code can count whether the medal rose. Hit rates per type decide which parent's recipe a cross passes on and shift tournament selection by less than half a point, which only breaks ties. The idea panel shows the recipe, the hit rate for its type and a child's ✓/✗; the overview shows hits per type. 71 tests pass (7 new). The jury has not been recalibrated after the schema change, and the after screenshots use recipe data staged in the browser, which the journal states.",
   "error": null,
   "costUsd": 2.64,
@@ -57,5 +57,6 @@
     }
   ],
   "filmLine": "On its first build the app taught its jury to say what would make each idea better, and then started keeping score on whether that advice was any good.",
-  "tests": "✔ lift rate is smoothed: 0.5 with no data, never 0 or 1 (0.094916ms)\n✔ only a judged, non-gold idea with a whole recipe hands one on (0.115459ms)\n✔ a cross takes the recipe whose type has lifted more often (0.095125ms)\n✔ the hit-rate nudge breaks ties in selection but never beats a point of jury score (20.554333ms)\nℹ tests 71\nℹ suites 0\nℹ pass 71\nℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 3020.641334"
+  "tests": "✔ lift rate is smoothed: 0.5 with no data, never 0 or 1 (0.094916ms)\n✔ only a judged, non-gold idea with a whole recipe hands one on (0.115459ms)\n✔ a cross takes the recipe whose type has lifted more often (0.095125ms)\n✔ the hit-rate nudge breaks ties in selection but never beats a point of jury score (20.554333ms)\nℹ tests 71\nℹ suites 0\nℹ pass 71\nℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 3020.641334",
+  "incident": "The merge carried a node_modules symlink that the builder itself had committed (its \"uncommitted changes\" step); the live server could not restart until a human repaired it. The builder now refuses branches that touch node_modules or data/."
 }

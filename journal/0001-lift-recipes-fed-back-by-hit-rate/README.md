@@ -53,3 +53,11 @@ With no idea selected, the overview gets a second card under Evolution: **Lift r
 ## For the film
 
 The loop's first build was about the loop itself: the app now asks its jury not just "how good is this?" but "what would make it better?", and then keeps score on whether that advice was any good. The awkward moment was the screenshot: the feature is about history, and a fresh feature has none, so the pictures show staged data. They say so.
+
+---
+
+## Postscript from the builder (written afterwards, by a human-supervised Claude Code session)
+
+The feature merged cleanly, and then the app fell over. While "committing what the agent left uncommitted", the builder also committed the worktree's `node_modules`, which is a symlink to the main checkout's. `.gitignore` said `node_modules/`, and a trailing slash only matches directories, not symlinks. The merge replaced the live app's real `node_modules` with a link to itself, and the restarted server could not find its one dependency.
+
+The agent did nothing wrong here: the bug was in the loop around it. The fix, in the same hour: `node_modules` and `data` are now ignored in every worktree, symlinks included, and the builder refuses any branch that touches them. That rule comes with a regression test and a line in CLAUDE.md.

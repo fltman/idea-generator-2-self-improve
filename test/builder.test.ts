@@ -23,7 +23,8 @@ before(() => {
   mkdirSync(join(app, 'server'));
   writeFileSync(join(app, 'server', 'index.ts'), "import { createServer } from 'node:http';\ncreateServer((q, s) => { s.writeHead(200); s.end('{}'); }).listen(Number(process.env.PORT), '127.0.0.1');\n");
   writeFileSync(join(app, 'README.md'), '# App\n\n## What it does\n\n- Seeds ideas and judges them.\n\n## Run\n\nnpm start\n');
-  writeFileSync(join(app, '.gitignore'), 'data/\nnode_modules/\n');
+  writeFileSync(join(app, '.gitignore'), 'data/\nnode_modules/\n'); // the trailing slash does not ignore a symlink: the guard must
+  mkdirSync(join(app, 'node_modules'));
   git('init', '-q', '-b', 'main');
   git('config', 'user.email', 'test@example.com');
   git('config', 'user.name', 'Test');
@@ -47,6 +48,7 @@ if (mode !== 'decline') {
   writeFileSync('feature-' + mode + '.txt', 'new feature\\n');
   writeFileSync(jdir + '/02-after.png', 'png');
   if (mode === 'broken') writeFileSync('BROKEN', '');
+  if (mode === 'sneaky') { mkdirSync('data', { recursive: true }); writeFileSync('data/leak.db', 'x'); execFileSync('git', ['add', '-f', 'data/leak.db']); }
   if (mode !== 'nocommit') {
     execFileSync('git', ['add', '-A']);
     execFileSync('git', ['commit', '-q', '-m', 'Build: ' + mode]);
@@ -118,10 +120,25 @@ test('a build whose tests fail never reaches main, but its journal does', async 
   assert.ok(existsSync(join(app, 'journal', '0003-breaks-everything', '02-after.png')), "the agent's screenshots are kept");
 });
 
+test('a branch that commits node_modules or data/ is refused, never merged', async () => {
+  const head = git('rev-parse', 'main');
+  const b = await buildWith('sneaky', 'Commits its data');
+  assert.equal(b.status, 'failed');
+  assert.match(b.error ?? '', /never commit: data\/leak.db/);
+  assert.ok(!existsSync(join(app, 'feature-sneaky.txt')));
+  assert.equal(git('rev-parse', 'main~1'), head, 'only the journal commit landed');
+});
+
+test('the linked node_modules is never committed for the agent', async () => {
+  const b = await buildWith('nocommit', 'Lazy agent again');
+  assert.equal(b.status, 'merged', b.error ?? '');
+  assert.equal(git('ls-files', 'node_modules'), '');
+});
+
 test('a declined idea is documented, not built', async () => {
   const b = await buildWith('decline', 'Impossible idea');
   assert.equal(b.status, 'declined');
-  assert.match(readFileSync(join(app, 'journal', '0004-impossible-idea', 'README.md'), 'utf8'), /Mode: decline/);
+  assert.match(readFileSync(join(app, 'journal', '0006-impossible-idea', 'README.md'), 'utf8'), /Mode: decline/);
   assert.match(readFileSync(join(app, 'journal', 'INDEX.md'), 'utf8'), /🚫 declined/);
 });
 
