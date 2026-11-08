@@ -7,8 +7,8 @@
 //   --seed "…"           a seed idea, repeatable; replaces the default seeds
 //   --usd N              the board's dollar limit per day (default 5)
 //   --retire             switch the autopilot off on the other self-improvement boards
-//   --focus users        aim the goal, jury and research at what users notice instead of
-//                        the evolution and the jury (default: evolution)
+//   --focus users|ops    aim the goal, jury and research at what users notice, or at cost,
+//                        speed and robustness, instead of the evolution and the jury (default: evolution)
 //   --spores             turn spores on: the autopilot trades its best ideas with other spore boards
 // A fresh board is how you restart the loop after many builds: the old board's
 // pool was bred before those builds existed and keeps proposing them again.
@@ -59,6 +59,18 @@ const FOCUS = {
       'Type a word and only the matching ideas stay lit on the canvas; filter by medal or by age with one click.',
       'A new board asks three short questions about what you want and writes its goal and first seeds from the answers.',
       'Gold ideas on a codebase board get a button that hands them to Claude Code in that folder and shows the result next to the idea.',
+    ],
+    wordingGap: false,
+  },
+  ops: {
+    goal: 'Make Idea Generator 2 faster, cheaper and sturdier to run: fewer and cheaper model calls per medal, less waiting, graceful recovery when a provider fails or the server restarts, and clear numbers on what each board and role costs. Every idea is a concrete change to this app that Claude Code can build, test and document in one unattended session.',
+    impact: 'IMPACT here means impact on running the app: dollars or seconds saved per medal, fewer failed or lost steps, faster recovery after errors and restarts, or costs the user can see and act on. A change that saves nothing measurable, or only measures the jury or the evolution, scores at most 2. Cosmetic tweaks score at most 2.',
+    research: 'LLM inference cost reduction, prompt caching, robust LLM pipelines, fault-tolerant job queues',
+    seeds: [
+      'The overview shows dollars and seconds per medal for each role, so you can see which step of the loop costs the most.',
+      'When a provider call fails, the queue retries it once on a fallback model and the idea says which model judged it.',
+      'After a server restart, queued judgements and half-finished autopilot steps resume instead of being lost.',
+      'Skip the judge call for an exact repeat of an idea already on the board, and count the dollars saved.',
     ],
     wordingGap: false,
   },
