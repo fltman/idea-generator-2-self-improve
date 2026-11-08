@@ -1,7 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { clampScore, fitness, medal, medalFromSum, scoreSum } from '../public/js/score.js';
-import { evolutionStats, expandedIds, nextMove, pairKey, usedPairs } from '../public/js/evolve.js';
+import {
+  breedScore, evolutionStats, expandedIds, liftHit, liftRate, liftStats, nextMove, pairKey, pickRecipe, recipeOf, usedPairs,
+} from '../public/js/evolve.js';
 
 const idea = (id: number, sum: number | null, extra: any = {}) => {
   const base: any = { id, kind: 'expand', generation: 1, medalOverride: null, ...extra };
@@ -110,4 +112,74 @@ test('evolution stats leave seeds out and compare first and latest windows', () 
   assert.equal(s.best, 12);
   assert.equal(s.generation, 5);
   assert.equal(evolutionStats(ideas.slice(0, 5)).latest, null, 'no "latest" until there is more than one window');
+});
+
+// ---------------------------------------------------------------- lift recipes
+
+test('lift recipes: a hit is a medal above the parent\'s medal at breeding time', () => {
+  const ideas = [
+    idea(1, 11, { liftType: 'feasibility', liftBase: 1 }), // bronze → silver: hit
+    idea(2, 10, { liftType: 'feasibility', liftBase: 1 }), // still bronze: miss
+    idea(3, null, { liftType: 'feasibility', liftBase: 1 }), // not judged: not counted
+    idea(4, 9, { liftType: 'impact', liftBase: 0 }), // none → bronze: hit
+    idea(5, 6, { liftType: 'impact', liftBase: 0, medalOverride: 2 }), // a hand-set medal counts
+    idea(6, 12, { liftType: 'charm', liftBase: 0 }), // unknown type: ignored
+    idea(7, 12), // no task
+  ];
+  assert.deepEqual(ideas.map(liftHit), [true, false, null, true, true, null, null]);
+  assert.deepEqual(liftStats(ideas), {
+    originality: { tries: 0, hits: 0 }, feasibility: { tries: 2, hits: 1 }, impact: { tries: 2, hits: 2 },
+  });
+});
+
+test('lift rate is smoothed: 0.5 with no data, never 0 or 1', () => {
+  const s = { originality: { tries: 0, hits: 0 }, feasibility: { tries: 4, hits: 0 }, impact: { tries: 4, hits: 4 } };
+  assert.equal(liftRate(s, 'originality'), 0.5);
+  assert.ok(liftRate(s, 'feasibility') > 0 && liftRate(s, 'feasibility') < 0.5);
+  assert.ok(liftRate(s, 'impact') > 0.5 && liftRate(s, 'impact') < 1);
+  assert.equal(liftRate({}, 'impact'), 0.5);
+});
+
+test('only a judged, non-gold idea with a whole recipe hands one on', () => {
+  assert.equal(recipeOf(idea(1, 10)), null, 'no recipe');
+  assert.equal(recipeOf(idea(1, null, { recipeType: 'impact', recipe: 'x' })), null, 'not judged');
+  assert.equal(recipeOf(idea(1, 13, { recipeType: 'impact', recipe: 'x' })), null, 'gold has no next medal');
+  assert.equal(recipeOf(idea(1, 10, { recipeType: 'impact', recipe: '' })), null, 'empty change');
+  const r = recipeOf(idea(1, 10, { recipeType: 'impact', recipe: 'Name the user.' }));
+  assert.deepEqual({ type: r.type, change: r.change, base: r.base, from: r.from.id }, { type: 'impact', change: 'Name the user.', base: 1, from: 1 });
+});
+
+test('a cross takes the recipe whose type has lifted more often', () => {
+  const a = idea(1, 10, { recipeType: 'originality', recipe: 'A' });
+  const b = idea(2, 10, { recipeType: 'impact', recipe: 'B' });
+  const none = { originality: { tries: 0, hits: 0 }, feasibility: { tries: 0, hits: 0 }, impact: { tries: 0, hits: 0 } };
+  assert.equal(pickRecipe(a, b, none).from.id, 1, 'a tie keeps the first parent');
+  assert.equal(pickRecipe(a, b, { ...none, impact: { tries: 3, hits: 3 } }).from.id, 2);
+  assert.equal(pickRecipe(idea(3, 10), b, none).from.id, 2, 'only one parent has a recipe');
+  assert.equal(pickRecipe(idea(3, 10), idea(4, 10), none), null);
+});
+
+test('the hit-rate nudge breaks ties in selection but never beats a point of jury score', () => {
+  const stats = { originality: { tries: 0, hits: 0 }, feasibility: { tries: 20, hits: 0 }, impact: { tries: 20, hits: 20 } };
+  const good = idea(1, 10, { recipeType: 'impact', recipe: 'x' });
+  const bad = idea(2, 10, { recipeType: 'feasibility', recipe: 'x' });
+  const better = idea(3, 11, { recipeType: 'feasibility', recipe: 'x' });
+  assert.ok(breedScore(good, stats) > breedScore(bad, stats));
+  assert.ok(breedScore(better, stats) > breedScore(good, stats));
+
+  // Two equal ideas: the one whose recipe type keeps working is picked as a parent more often.
+  const ideas = [
+    idea(1, 10, { recipeType: 'impact', recipe: 'x' }),
+    idea(2, 10, { recipeType: 'feasibility', recipe: 'x' }),
+    idea(3, 10),
+    ...Array.from({ length: 6 }, (_, n) => idea(10 + n, 11, { liftType: 'impact', liftBase: 1 })), // hits
+    ...Array.from({ length: 6 }, (_, n) => idea(20 + n, 10, { liftType: 'feasibility', liftBase: 1 })), // misses
+  ];
+  const count = new Map<number, number>();
+  const rng = rngFrom(7);
+  for (let n = 0; n < 3000; n++) {
+    const m = nextMove(ideas, [], { rng, mutationRate: 0 });
+    if (m?.type === 'combine') for (const p of [m.a, m.b]) count.set(p.id, (count.get(p.id) ?? 0) + 1);
+  }
+  assert.ok((count.get(1) ?? 0) > (count.get(2) ?? 0) * 1.2, `impact ${count.get(1)} vs feasibility ${count.get(2)}`);
 });

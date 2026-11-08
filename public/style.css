@@ -139,6 +139,13 @@ main { display: flex; min-height: 0; }
 .meter span.on { background: var(--accent); }
 .meter-value { text-align: right; font-variant-numeric: tabular-nums; }
 .reason { margin: 10px 0 0; color: var(--text-2); font-style: italic; }
+.lift { margin: 0 0 12px; padding: 10px 12px; border-radius: var(--radius); border: 1px dashed var(--line); font-size: 12px; }
+.lift-head { font-weight: 600; color: var(--text); cursor: help; }
+.lift-text { margin: 4px 0; color: var(--text-2); }
+.lift-task { margin-bottom: 8px; }
+.lift-task .linkish { text-align: left; }
+.lift-hit { color: #5fd38d; }
+.lift-miss { color: #e58a7a; }
 .judging { display: flex; gap: 10px; align-items: center; margin: 12px 0; color: var(--gold); }
 .spinner { width: 14px; height: 14px; border: 2px solid rgba(245,197,66,.3); border-top-color: var(--gold); border-radius: 50%; animation: spin .8s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }

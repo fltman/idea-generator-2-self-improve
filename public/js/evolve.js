@@ -5,7 +5,7 @@
 // instead, expanding a strong idea that has not been expanded yet, which
 // brings new material into the pool.
 
-import { fitness } from './score.js';
+import { fitness, medal, CRITERIA } from './score.js';
 
 export const pairKey = (a, b) => (a < b ? `${a}-${b}` : `${b}-${a}`);
 
@@ -38,11 +38,73 @@ export function expandedIds(ideas, edges) {
   return out;
 }
 
-function tournament(pool, k, rng) {
+// ---------------------------------------------------------------- lift recipes
+//
+// The jury writes, for every idea, one "lift recipe": the single change that
+// would earn it the next medal, typed by the criterion it raises
+// (originality, feasibility or impact). A child bred from that idea gets the
+// recipe as its task and remembers which type it was handed (liftType) and
+// its parent's medal at the time (liftBase). Once the child is judged, the
+// recipe either lifted the medal or it did not, and that is counted here.
+
+export const LIFT_TYPES = CRITERIA;
+
+/** Per recipe type: how many judged children were bred with it, and how many beat their parent's medal. */
+export function liftStats(ideas) {
+  const out = Object.fromEntries(LIFT_TYPES.map((t) => [t, { tries: 0, hits: 0 }]));
+  for (const i of ideas) {
+    const hit = liftHit(i);
+    if (hit == null) continue;
+    out[i.liftType].tries++;
+    if (hit) out[i.liftType].hits++;
+  }
+  return out;
+}
+
+/** Smoothed hit rate (Laplace): 0.5 with no data, never exactly 0 or 1. */
+export function liftRate(stats, type) {
+  const s = stats?.[type];
+  return s ? (s.hits + 1) / (s.tries + 2) : 0.5;
+}
+
+/** Did this bred idea's recipe lift the medal? null: no recipe task, or not judged yet. */
+export function liftHit(idea) {
+  if (!LIFT_TYPES.includes(idea?.liftType) || !Number.isInteger(idea?.liftBase)) return null;
+  const m = medal(idea);
+  return m == null ? null : m > idea.liftBase;
+}
+
+/** The recipe an idea can hand on: it needs one, and gold has no next medal to reach. */
+export function recipeOf(idea) {
+  if (!LIFT_TYPES.includes(idea?.recipeType) || !idea?.recipe) return null;
+  const base = medal(idea);
+  if (base == null || base >= 3) return null;
+  return { type: idea.recipeType, change: idea.recipe, from: idea, base };
+}
+
+/** For a cross: of the two parents' recipes, the one whose type has the better hit rate (a on a tie). */
+export function pickRecipe(a, b, stats) {
+  const ra = recipeOf(a);
+  const rb = recipeOf(b);
+  if (!ra || !rb) return ra ?? rb;
+  return liftRate(stats, rb.type) > liftRate(stats, ra.type) ? rb : ra;
+}
+
+/**
+ * What the tournament compares: fitness plus a nudge from the hit rate of the
+ * idea's own recipe type. The nudge stays within ±0.5, so it never beats a
+ * full point of jury score; it decides between ideas the jury scored the same.
+ */
+export function breedScore(idea, stats) {
+  const r = recipeOf(idea);
+  return fitness(idea) + (r ? liftRate(stats, r.type) - 0.5 : 0);
+}
+
+function tournament(pool, k, rng, stats) {
   let best = null;
   for (let i = 0; i < k; i++) {
     const c = pool[Math.floor(rng() * pool.length)];
-    if (!best || fitness(c) > fitness(best)) best = c;
+    if (!best || breedScore(c, stats) > breedScore(best, stats)) best = c;
   }
   return best;
 }
@@ -59,6 +121,7 @@ export function nextMove(ideas, edges, opts = {}) {
   const pool = population(ideas).filter((i) => !busy.has(i.id));
   const expanded = expandedIds(ideas, edges);
   const used = usedPairs(ideas, edges);
+  const stats = liftStats(ideas);
 
   const bestUnexpanded = () =>
     [...pool].sort((a, b) => fitness(b) - fitness(a)).find((i) => !expanded.has(i.id));
@@ -70,9 +133,9 @@ export function nextMove(ideas, edges, opts = {}) {
 
   if (pool.length >= 2) {
     for (let attempt = 0; attempt < 40; attempt++) {
-      const a = tournament(pool, k, rng);
+      const a = tournament(pool, k, rng, stats);
       const rest = pool.filter((i) => i.id !== a.id);
-      const b = tournament(rest, k, rng);
+      const b = tournament(rest, k, rng, stats);
       const key = pairKey(a.id, b.id);
       if (used.has(key) || inFlight.has(key)) continue;
       return { type: 'combine', a, b };

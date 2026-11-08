@@ -4,16 +4,32 @@
 // Schemas avoid integer minimum/maximum (Anthropic rejects them), so ranges
 // live in descriptions and are clamped in code.
 
-import { clampScore } from '../public/js/score.js';
+import { clampScore, CRITERIA } from '../public/js/score.js';
 import type { ChatFn } from './providers.ts';
 export type { ChatFn, ChatRequest } from './providers.ts';
 
 export type Lang = 'sv' | 'en';
 type Pitch = { title: string; pitch: string };
+/** A parent's lift recipe, handed to its offspring as their task. */
+export type LiftTask = { type: string; change: string; from: Pitch };
 type Flow = { system: string; expand: string; combine: string };
 /** fixedLang: write in this language whatever the sources are in (self-improvement boards: the code and journal follow the board). */
 type BoardCtx = { goal: string; fixedLang?: Lang };
-export type Judgement = { originality: number; feasibility: number; impact: number; reason: string; keywords: string[] };
+export type Judgement = {
+  originality: number; feasibility: number; impact: number; reason: string; keywords: string[];
+  /** The lift recipe: which criterion, and the one change that would earn the next medal. null when the model gave none. */
+  liftType: string | null; lift: string | null;
+};
+
+/** The task line for a child bred under a lift recipe. */
+function liftTaskText(t: LiftTask | null | undefined, many = false) {
+  if (!t) return '';
+  return [
+    `The jury's lift recipe for "${t.from.title}" (the one change that would earn it the next medal, by raising its ${t.type}):`,
+    t.change,
+    `Your task: ${many ? 'every new idea' : 'the new idea'} must carry out exactly this change, while staying a whole, concrete idea.`,
+  ].join('\n');
+}
 
 /** One canonical form so "Public Spaces" and "public space" count as one trend. */
 export function normalizeKeywords(raw: unknown): string[] {
@@ -59,8 +75,19 @@ const JUDGE_SCHEMA = {
       description: '2–4 keywords for what the idea is about: English, lowercase, singular, 1–2 words each. Reuse a keyword from the vocabulary when one fits.',
       items: { type: 'string' },
     },
+    // The lift recipe comes after the scores, so writing it cannot pull them.
+    liftType: {
+      type: 'string',
+      enum: [...CRITERIA],
+      description: 'The one criterion whose score the lift recipe raises.',
+    },
+    lift: {
+      type: 'string',
+      description:
+        'The lift recipe: ONE concrete change to the idea, at most 25 words, in the language of the reason, that would raise the total enough to earn the next medal (bronze 9, silver 11, gold 13). Say what to change, not what is wrong.',
+    },
   },
-  required: ['reason', 'originality', 'feasibility', 'impact', 'keywords'],
+  required: ['reason', 'originality', 'feasibility', 'impact', 'keywords', 'liftType', 'lift'],
   additionalProperties: false,
 };
 
@@ -195,10 +222,11 @@ export function makeLLM(chat: ChatFn) {
   });
 
   return {
-    async expand(a: { model: string; flow: Flow; board: BoardCtx; idea: Pitch; existingTitles: string[]; lang: Lang }) {
+    async expand(a: { model: string; flow: Flow; board: BoardCtx; idea: Pitch; existingTitles: string[]; lang: Lang; task?: LiftTask | null }) {
       const user = [
         a.flow.expand,
         `The concept:\n${fmtIdea(a.idea)}`,
+        liftTaskText(a.task, true),
         context(a.board, a.existingTitles),
         languageRule(a.lang, a.board.fixedLang),
       ]
@@ -210,11 +238,12 @@ export function makeLLM(chat: ChatFn) {
       return { ideas: ideas.slice(0, 3), costUsd };
     },
 
-    async combine(a: { model: string; flow: Flow; board: BoardCtx; a: Pitch; b: Pitch; existingTitles: string[]; lang: Lang }) {
+    async combine(a: { model: string; flow: Flow; board: BoardCtx; a: Pitch; b: Pitch; existingTitles: string[]; lang: Lang; task?: LiftTask | null }) {
       const user = [
         a.flow.combine,
         `Idea 1:\n${fmtIdea(a.a)}`,
         `Idea 2:\n${fmtIdea(a.b)}`,
+        liftTaskText(a.task),
         context(a.board, a.existingTitles),
         languageRule(a.lang, a.board.fixedLang),
       ]
@@ -347,7 +376,7 @@ export function makeLLM(chat: ChatFn) {
         schemaName: 'judgement',
         schema: JUDGE_SCHEMA,
         temperature: 0.2,
-        maxTokens: 400,
+        maxTokens: 600, // room for the lift recipe after the scores
       });
       const judgement: Judgement = {
         originality: clampScore(value?.originality),
@@ -355,7 +384,13 @@ export function makeLLM(chat: ChatFn) {
         impact: clampScore(value?.impact),
         reason: String(value?.reason ?? '').trim().slice(0, 400),
         keywords: normalizeKeywords(value?.keywords),
+        liftType: null,
+        lift: null,
       };
+      // A recipe counts only whole: a known type and a non-empty change.
+      const liftType = String(value?.liftType ?? '').trim().toLowerCase();
+      const lift = String(value?.lift ?? '').trim().slice(0, 300);
+      if ((CRITERIA as readonly string[]).includes(liftType) && lift) Object.assign(judgement, { liftType, lift });
       return { judgement, costUsd };
     },
   };

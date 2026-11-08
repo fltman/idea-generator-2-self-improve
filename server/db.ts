@@ -43,6 +43,11 @@ CREATE TABLE IF NOT EXISTS ideas (
   project_path TEXT,
   origin_idea_id INTEGER REFERENCES ideas(id) ON DELETE SET NULL,
   origin_board_id INTEGER REFERENCES boards(id) ON DELETE SET NULL,
+  recipe_type TEXT,
+  recipe TEXT,
+  lift_type TEXT,
+  lift_from INTEGER REFERENCES ideas(id) ON DELETE SET NULL,
+  lift_base INTEGER,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS ideas_board ON ideas(board_id);
@@ -286,6 +291,13 @@ export type Idea = {
   originBoardId: number | null;
   originBoardTitle: string | null;
   keywords: string[];
+  /** The jury's lift recipe for this idea: the criterion it raises, and the change. */
+  recipeType: string | null;
+  recipe: string | null;
+  /** Bred under a parent's lift recipe: its type, the parent, and the parent's medal (0–3) at the time. */
+  liftType: string | null;
+  liftFrom: number | null;
+  liftBase: number | null;
   createdAt: string;
 };
 
@@ -353,6 +365,11 @@ const ideaFromRow = (r: any): Idea => ({
   originBoardId: r.origin_board_id,
   originBoardTitle: r.origin_board_title ?? null,
   keywords: r.keywords ? String(r.keywords).split('|') : [],
+  recipeType: r.recipe_type ?? null,
+  recipe: r.recipe ?? null,
+  liftType: r.lift_type ?? null,
+  liftFrom: r.lift_from ?? null,
+  liftBase: r.lift_base ?? null,
   createdAt: r.created_at,
 });
 
@@ -399,6 +416,11 @@ export function openDb(file: string) {
   db.exec('PRAGMA foreign_keys = ON;');
   if (file !== ':memory:') db.exec('PRAGMA journal_mode = WAL;');
   db.exec(SCHEMA);
+  // Databases from before lift recipes: add the columns (SQLite has no ADD COLUMN IF NOT EXISTS).
+  const ideaCols = new Set((db.prepare('PRAGMA table_info(ideas)').all() as any[]).map((c) => c.name));
+  for (const [name, type] of [['recipe_type', 'TEXT'], ['recipe', 'TEXT'], ['lift_type', 'TEXT'], ['lift_from', 'INTEGER'], ['lift_base', 'INTEGER']]) {
+    if (!ideaCols.has(name)) db.exec(`ALTER TABLE ideas ADD COLUMN ${name} ${type}`);
+  }
 
   if ((db.prepare('SELECT COUNT(*) AS n FROM templates').get() as any).n === 0) {
     const ins = db.prepare('INSERT INTO templates (name, system, expand, combine, sort) VALUES (?, ?, ?, ?, ?)');
@@ -493,16 +515,20 @@ export function openDb(file: string) {
       i: {
         boardId: number; title: string; pitch: string; kind: Idea['kind']; sourceUrl?: string | null;
         x: number; y: number; generation: number; originIdeaId?: number | null; originBoardId?: number | null;
+        lift?: { type: string; from: number; base: number } | null;
       },
       parentIds: number[] = [],
     ): Idea {
       return tx(() => {
         const { lastInsertRowid } = db
           .prepare(
-            `INSERT INTO ideas (board_id, title, pitch, kind, source_url, x, y, generation, origin_idea_id, origin_board_id)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            `INSERT INTO ideas (board_id, title, pitch, kind, source_url, x, y, generation, origin_idea_id, origin_board_id, lift_type, lift_from, lift_base)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           )
-          .run(i.boardId, i.title, i.pitch, i.kind, i.sourceUrl ?? null, i.x, i.y, i.generation, i.originIdeaId ?? null, i.originBoardId ?? null);
+          .run(
+            i.boardId, i.title, i.pitch, i.kind, i.sourceUrl ?? null, i.x, i.y, i.generation, i.originIdeaId ?? null, i.originBoardId ?? null,
+            i.lift?.type ?? null, i.lift?.from ?? null, i.lift?.base ?? null,
+          );
         const id = Number(lastInsertRowid);
         const edge = db.prepare('INSERT OR IGNORE INTO edges (board_id, from_id, to_id) VALUES (?, ?, ?)');
         for (const p of parentIds) edge.run(i.boardId, p, id);
@@ -514,10 +540,10 @@ export function openDb(file: string) {
     hasGuest(boardId: number, originIdeaId: number) {
       return !!db.prepare('SELECT 1 FROM ideas WHERE board_id = ? AND (origin_idea_id = ? OR id = ?)').get(boardId, originIdeaId, originIdeaId);
     },
-    saveJudgement(id: number, j: { originality: number; feasibility: number; impact: number; reason: string }) {
+    saveJudgement(id: number, j: { originality: number; feasibility: number; impact: number; reason: string; liftType?: string | null; lift?: string | null }) {
       db.prepare(
-        `UPDATE ideas SET originality = ?, feasibility = ?, impact = ?, reason = ?, judged_at = datetime('now') WHERE id = ?`,
-      ).run(j.originality, j.feasibility, j.impact, j.reason, id);
+        `UPDATE ideas SET originality = ?, feasibility = ?, impact = ?, reason = ?, recipe_type = ?, recipe = ?, judged_at = datetime('now') WHERE id = ?`,
+      ).run(j.originality, j.feasibility, j.impact, j.reason, j.liftType ?? null, j.lift ?? null, id);
       return repo.getIdea(id);
     },
     setKeywords(id: number, keywords: string[]) {
