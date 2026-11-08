@@ -1,0 +1,25 @@
+{
+  "seq": 3,
+  "title": "Gold waits for the blind second judge before a build starts",
+  "pitch": "Today a jury 13 on a self-improvement board queues a build at once, before the blind second judge (build 0002) has answered. Instead: a borderline gold waits for the second opinion; the build is queued only if both medals agree on gold. If they disagree the idea is marked contested in the panel and the Builds view, and waits for a human (who can still start it by hand). Gold set by hand builds at once, as now.",
+  "status": "merged",
+  "trigger": "hand",
+  "branch": "build/0003-gold-waits-for-the-blind-second-judge-be",
+  "commit": null,
+  "summary": "On a self-improvement board, a jury score of exactly 13 no longer starts a build at once. It now waits for the blind second judge. A new pure function, goldGate() in score.js, decides what happens next: if the second judge also gives gold, the build is queued; if it gives less, the idea is marked contested. A contested idea gets a note in the idea panel, a toast and a ⚖ count on the Builds button. The Builds view lists it under a new 'Contested gold – waiting for a human' section with a 'Build anyway' button. Clear gold (14–15) and gold set by hand still build at once. Tests: 81 of 81 pass, including new ones for the gate, for the engine holding a build back until the second judge answers, and for the contested list in /api/builds. One older test expected a 13 to build at once; it now uses a 14, with no assertion removed. The live board has no jury 13, so the 'after' screenshots use scores set in the browser only, and the journal says so.",
+  "error": null,
+  "costUsd": 1.93,
+  "sessionId": "498fd03e-60cd-42e7-b0c6-34515fa12dd5",
+  "createdAt": "2026-11-08 08:16:41",
+  "startedAt": "2026-11-08 08:16:41",
+  "finishedAt": "2026-11-08 08:21:57",
+  "jury": {
+    "originality": 2,
+    "feasibility": 4,
+    "impact": 3,
+    "reason": "Closes a known open gap from 0002 (a 13 starts a build before the second opinion arrives) with a contained gate, but it is a small tweak with narrow reach."
+  },
+  "lineage": [],
+  "filmLine": "The app learned to stop and wait for a second opinion before rewriting its own code, and when the two judges disagree it now waits for a human.",
+  "tests": "✔ second opinion: only a jury sum exactly on a medal threshold is on the edge (0.196542ms)\n✔ second opinion: the band spans both sums and says whether the medals agree (0.150958ms)\n✔ second opinion: disagreement lowers the breeding score by half the gap, either way; agreement costs nothing (0.067708ms)\n✔ gold gate: a jury gold on the edge waits for the second judge; only agreement builds (0.157166ms)\nℹ tests 81\nℹ suites 0\nℹ pass 81\nℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 4145.46675"
+}

@@ -7,7 +7,7 @@ This fork improves itself. A self-improvement board generates changes to this ap
 ## Commands
 
 - `npm run dev` – server on http://localhost:8301 that restarts when `server/` changes. A merged build relies on this. (`npm start` does not restart.) `PORT`, `HOST` and `DB_FILE` override.
-- `npm test` – 78 tests (`node --test`), with a fake LLM, fake provider servers, a fake `claude` CLI and a fake build agent. No network.
+- `npm test` – 81 tests (`node --test`), with a fake LLM, fake provider servers, a fake `claude` CLI and a fake build agent. No network.
 - `npm run self:setup` – creates the self-improvement board on a running server.
 - `node tools/shoot.ts --out file.png [--board N] [--eval js]…` – boots this checkout's server against a copy of `data/ideas.db` (autopilot and builder off), opens headless Chrome, and saves a PNG. `--help` lists the options.
 - `npm run calibrate [-- --model provider:model]` – real judge against weak and strong reference ideas. It costs money. **Re-run it whenever the judge's prompt, schema or model changes.**
@@ -22,6 +22,7 @@ This fork improves itself. A self-improvement board generates changes to this ap
 - `server/llm.ts` – every prompt, including the judge (`JUDGE_SYSTEM`). Each function takes `model`.
 - `server/engine.ts` – every operation, the background judge queue (max 3) and the per-board event bus.
   - Second opinion: after a verdict on a medal edge (`onMedalEdge()` in `score.js`: sum exactly 9, 11 or 13) on a self-improvement board, `queueRetrial()` re-runs `llm.judge` with the `retrial` role's model (default `claudecode:opus`), blind, in the background, and stores the scores in `ideas.retrial` (JSON). Skipped if the retrial and judge models are the same. `POST /api/ideas/:id/retrial` does it by hand on any board. `saveJudgement()` clears it. `engine.idle()` waits for retrials too.
+  - Gold gate (build 0003): on a self-improvement board a jury gold that gets an automatic retrial (a 13) does not call `onGold` from `judge()`. `retrial()` calls it when `goldGate()` (`score.js`) says `'agreed'`, and emits a `contested` event when it says `'contested'`. `GET /api/builds` returns `contested` (such ideas with no build) for the Builds view. Clear gold (14–15), a gold where both roles share a model, and a hand-set gold still go to the builder at once.
 - `server/autopilot.ts` – the scheduler and the pure `rateCheck()`.
 - `server/leads.ts` – the X and research scouts.
 - `server/project.ts` – Claude Code folders.
@@ -43,7 +44,7 @@ This fork improves itself. A self-improvement board generates changes to this ap
 
 - **The medal comes from code, not the model:** a sum of three 1–5 scores, bronze from 9, silver from 11, gold from 13 (`score.js`). Left uncalibrated, an LLM jury gave 3/3 to the bare word "fire"; the calibration test keeps that from happening here.
 - **The lift-recipe nudge stays below one point.** `breedScore()` adds the hit rate minus 0.5 (Laplace-smoothed, so strictly within ±0.5) to fitness. It may only reorder ideas the jury scored the same; the jury's score stays what selection rests on.
-- **The second judge never changes the medal.** `confidenceBand()` (`score.js`) only shows the band; `doubtPenalty()` (`evolve.js`) subtracts half the gap between the two sums from `breedScore()`, and nothing for a hand-set medal. The second judge must stay blind: never pass it the jury's scores or reason. The `retrial` model (`claudecode:opus`) passed calibration on 2026-11-08 (see Measured). If you change it, run `npm run calibrate -- --model <it>` first.
+- **The second judge never changes the medal.** `confidenceBand()` (`score.js`) only shows the band; `doubtPenalty()` (`evolve.js`) subtracts half the gap between the two sums from `breedScore()`, and nothing for a hand-set medal. It can hold back a build (a contested gold waits for a human), but the gold medal stays on the idea. The second judge must stay blind: never pass it the jury's scores or reason. The `retrial` model (`claudecode:opus`) passed calibration on 2026-11-08 (see Measured). If you change it, run `npm run calibrate -- --model <it>` first.
 - **Never put integer `minimum`/`maximum` in a JSON schema.** Anthropic rejects them. Put the range in the description and clamp in code.
 - **Anthropic native: send no `temperature`.** API version 2026-10-21 rejects it. Use effort `low`. The SDK sends the key as a Bearer token.
 - **OpenRouter: send `reasoning:{enabled:false}`** and retry without it on a 400 that mentions reasoning (some models insist on reasoning).

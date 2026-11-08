@@ -332,6 +332,14 @@ body.exhibit #seed-input { font-size: 20px; padding: 18px 22px; }
 .bt-summary { margin: 8px 0; font-size: 13px; }
 .bt-reload { margin: 0 0 8px; color: var(--good); font-size: 13px; }
 .build-block .linkish { display: block; margin-bottom: 4px; }
+/* A jury gold on the edge: waiting for the second judge, or contested and waiting for a human. */
+.gate { margin: 0 0 8px; font-size: 13px; padding: 6px 10px; border-radius: 6px; border: 1px solid var(--line); }
+.gate.waiting { color: var(--text-2); }
+.gate.contested { color: var(--gold); border-color: #6b5521; }
+.bt-phase.s-contested { color: var(--gold); border-color: #6b5521; }
+.build-card.s-contested { border-left-color: var(--gold); border-style: dashed solid dashed solid; }
+.contested-list { margin: 0 0 22px; }
+.contested-list h3 { margin: 0 0 4px; font-size: 15px; color: var(--gold); }
 .build-list { display: grid; gap: 14px; max-width: 980px; }
 .build-card { background: var(--surface); border: 1px solid var(--line); border-left: 3px solid var(--line); border-radius: var(--radius); padding: 12px 16px; }
 .build-card.s-merged { border-left-color: var(--good); }

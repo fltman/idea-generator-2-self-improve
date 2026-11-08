@@ -5,7 +5,7 @@ import { $, h, clear, toast, debounce } from './dom.js';
 import { t, getLang, setLang, applyI18n, errorText } from './i18n.js';
 import { Graph, KIND_COLORS } from './graph.js';
 import { loadSettings, saveSettings, pushSettings, ROLES, PROVIDER_IDS, providersInUse, DEFAULTS } from './settings.js';
-import { medal, scoreSum, fitness, CRITERIA, isJudged, onMedalEdge, confidenceBand, MEDAL_MIN_SUM } from './score.js';
+import { medal, scoreSum, fitness, CRITERIA, isJudged, onMedalEdge, confidenceBand, MEDAL_MIN_SUM, goldGate, retrialSum } from './score.js';
 import { evolutionStats, liftStats, liftHit, LIFT_TYPES, doubtPenalty } from './evolve.js';
 import { openDashboard } from './dashboard.js';
 import { openReport } from './report.js';
@@ -175,6 +175,7 @@ function onEvent(e) {
       break;
     case 'build':
     case 'buildLog':
+    case 'contested':
       onBuildEvent(e);
       break;
     case 'error':
@@ -563,7 +564,11 @@ function renderIdea(idea) {
 function buildBlock(idea) {
   const b = buildFor(idea.id);
   const again = !b || ['failed', 'declined', 'interrupted', 'cancelled'].includes(b.status);
+  // A jury gold on the edge waits for the blind second judge; if they disagree, a human decides.
+  const gate = b ? null : goldGate(idea);
   return h('div', { class: 'project build-block' },
+    gate === 'waiting' ? h('p', { class: 'gate waiting' }, `⏳ ${t('gateWaiting')}`) : null,
+    gate === 'contested' ? h('p', { class: 'gate contested' }, `⚖ ${t('gateContested', { a: scoreSum(idea), b: retrialSum(idea) })}`) : null,
     b ? h('button', { class: 'linkish', onclick: openBuilds },
       `${buildIcon(b.status)} ${t('buildWord')} ${b.seq ? formatSeq(b.seq) : ''} · ${b.status === 'running' ? t(`phase_${b.phase ?? 'preparing'}`) : t(`bstatus_${b.status}`)}`) : null,
     b?.summary ? h('p', { class: 'small muted' }, b.summary) : null,

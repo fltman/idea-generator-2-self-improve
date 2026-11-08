@@ -7,7 +7,7 @@ import { api } from './api.js';
 import { $, h, clear, toast } from './dom.js';
 import { t, errorText } from './i18n.js';
 
-const S = { builds: [], active: null, lines: [], enabled: false, onChange: null, onOpenIdea: null, tick: null, collapsed: false, reloadAt: 0 };
+const S = { builds: [], contested: [], active: null, lines: [], enabled: false, onChange: null, onOpenIdea: null, tick: null, collapsed: false, reloadAt: 0 };
 const ICON = { queued: '⏳', running: '🔨', merged: '✅', ready: '🟡', failed: '❌', declined: '🚫', interrupted: '⏸', cancelled: '⏹' };
 const pad = (n) => String(n ?? '').padStart(4, '0');
 const when = (s) => (s ? new Date(s.replace(' ', 'T') + 'Z') : null);
@@ -28,6 +28,7 @@ async function refresh() {
     const r = await api('GET', '/api/builds');
     S.enabled = r.enabled;
     S.builds = r.builds;
+    S.contested = r.contested ?? [];
     S.active = r.active?.build ?? null;
     S.lines = r.active?.lines ?? [];
   } catch {
@@ -45,6 +46,8 @@ export async function startBuild(ideaId) {
   try {
     const r = await api('POST', `/api/ideas/${ideaId}/build`, {});
     upsert(r.build);
+    S.contested = S.contested.filter((c) => c.id !== ideaId);
+    if (!$('#builds').hidden) renderView();
     toast(t('buildQueued', { t: r.build.title }), 'good');
   } catch (e) {
     toast(errorText(e), 'error', 8000);
@@ -73,6 +76,10 @@ export function onBuildEvent(e) {
     renderButton();
     renderTicker();
     if (!$('#builds').hidden) renderView();
+  } else if (e.type === 'contested') {
+    // The second judge did not agree on gold: the idea waits here for a human.
+    toast(t('contestedToast', { t: e.title, a: e.first, b: e.second }), 'info', 12000);
+    refresh().then(() => { if (!$('#builds').hidden) renderView(); });
   } else if (e.type === 'buildLog') {
     if (S.active?.id !== e.id) return;
     S.lines.push(...e.lines);
@@ -99,7 +106,8 @@ function finished(b) {
 function renderButton() {
   const btn = $('#builds-btn');
   const queued = S.builds.filter((b) => b.status === 'queued').length;
-  btn.textContent = `${S.active ? '🔨 ' : ''}${t('builds')}${queued ? ` (${queued})` : ''}`;
+  const held = S.contested.length;
+  btn.textContent = `${S.active ? '🔨 ' : ''}${t('builds')}${queued ? ` (${queued})` : ''}${held ? ` ⚖${held}` : ''}`;
   btn.classList.toggle('busy', !!S.active);
 }
 
@@ -196,7 +204,29 @@ function renderView() {
       tile(t('bstatus_merged'), `${done.length}`),
       tile(t('buildCost'), `$${cost.toFixed(2)}`),
     ),
+    S.contested.length
+      ? h('section', { class: 'contested-list' },
+          h('h3', {}, `⚖ ${t('contestedTitle')}`),
+          h('p', { class: 'muted small' }, t('contestedIntro')),
+          h('div', { class: 'build-list' }, S.contested.map(contestedCard)))
+      : null,
     S.builds.length ? h('div', { class: 'build-list' }, S.builds.map(card)) : h('p', { class: 'muted' }, t('buildsNone')),
+  );
+}
+
+/** A jury gold the second judge disagreed with: no build yet, a human decides. */
+function contestedCard(c) {
+  return h('article', { class: 'build-card s-contested' },
+    h('div', { class: 'row space' },
+      h('h3', {}, `⚖ ${c.title}`),
+      h('span', { class: 'bt-phase s-contested' }, t('contested')),
+    ),
+    c.pitch ? h('p', { class: 'muted small' }, c.pitch) : null,
+    h('p', { class: 'small' }, t('contestedScores', { a: c.first, b: c.second, m: c.model ?? '?' })),
+    h('div', { class: 'row' },
+      h('button', { class: 'btn small cc', title: t('buildHint'), onclick: () => startBuild(c.id) }, `🔨 ${t('contestedBuild')}`),
+      h('button', { class: 'btn small', onclick: () => { close(); S.onOpenIdea?.(c.boardId, c.id); } }, t('openIdea')),
+    ),
   );
 }
 
