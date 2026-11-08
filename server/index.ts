@@ -44,6 +44,7 @@ try {
 
 let builder: Builder | null = null;
 let camera: Camera | null = null;
+const pictured = new Set<number>();
 const engine = createEngine({
   repo, chat: makeChat(runtime.get), settings: runtime.get,
   onGold: (idea, by) => {
@@ -58,7 +59,10 @@ if (!off('IDEAGEN_NO_BUILDER')) {
     emit: (e) => {
       engine.bus.emitAll(e);
       const b = e.type === 'build' ? e.build : null;
-      if (b && b.status === 'running' && b.phase === 'building') camera?.snap(`build ${b.seq} started ${b.title}`);
+      if (b && b.status === 'running' && b.phase === 'building' && !pictured.has(b.id)) {
+        pictured.add(b.id); // once per build, not at every update while it builds
+        camera?.snap(`build ${b.seq} started ${b.title}`);
+      }
       if (b && ['failed', 'declined', 'ready', 'cancelled'].includes(b.status)) camera?.snap(`build ${b.seq} ${b.status} ${b.title}`);
     },
     push: process.env.BUILD_PUSH === '1',
