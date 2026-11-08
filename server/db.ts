@@ -49,6 +49,7 @@ CREATE TABLE IF NOT EXISTS ideas (
   lift_from INTEGER REFERENCES ideas(id) ON DELETE SET NULL,
   lift_base INTEGER,
   lift_arm TEXT,
+  escape_kw TEXT,
   retrial TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
@@ -302,6 +303,8 @@ export type Idea = {
   liftBase: number | null;
   /** Placebo trials: 'recipe', 'placebo' (a vague "improve it" instead of the recipe; liftType is the withheld type) or 'none' (the parent had no recipe; liftType null). null: older idea, or not bred toward a medal. */
   liftArm: string | null;
+  /** Diversity pressure: the dominant keyword of the monoculture the autopilot bred this idea outside of. null: an ordinary breed. */
+  escape: string | null;
   /** A blind second judge's scores (verdicts on a medal edge), on another model. Cleared when the jury re-judges. */
   retrial: Retrial | null;
   createdAt: string;
@@ -378,6 +381,7 @@ const ideaFromRow = (r: any): Idea => ({
   liftFrom: r.lift_from ?? null,
   liftBase: r.lift_base ?? null,
   liftArm: r.lift_arm ?? null,
+  escape: r.escape_kw ?? null,
   retrial: r.retrial ? parseJson(r.retrial) : null,
   createdAt: r.created_at,
 });
@@ -427,7 +431,7 @@ export function openDb(file: string) {
   db.exec(SCHEMA);
   // Databases from before lift recipes: add the columns (SQLite has no ADD COLUMN IF NOT EXISTS).
   const ideaCols = new Set((db.prepare('PRAGMA table_info(ideas)').all() as any[]).map((c) => c.name));
-  for (const [name, type] of [['recipe_type', 'TEXT'], ['recipe', 'TEXT'], ['lift_type', 'TEXT'], ['lift_from', 'INTEGER'], ['lift_base', 'INTEGER'], ['retrial', 'TEXT'], ['lift_arm', 'TEXT']]) {
+  for (const [name, type] of [['recipe_type', 'TEXT'], ['recipe', 'TEXT'], ['lift_type', 'TEXT'], ['lift_from', 'INTEGER'], ['lift_base', 'INTEGER'], ['retrial', 'TEXT'], ['lift_arm', 'TEXT'], ['escape_kw', 'TEXT']]) {
     if (!ideaCols.has(name)) db.exec(`ALTER TABLE ideas ADD COLUMN ${name} ${type}`);
   }
 
@@ -525,18 +529,19 @@ export function openDb(file: string) {
         boardId: number; title: string; pitch: string; kind: Idea['kind']; sourceUrl?: string | null;
         x: number; y: number; generation: number; originIdeaId?: number | null; originBoardId?: number | null;
         lift?: { type: string | null; from: number; base: number; arm?: string } | null;
+        escape?: string | null;
       },
       parentIds: number[] = [],
     ): Idea {
       return tx(() => {
         const { lastInsertRowid } = db
           .prepare(
-            `INSERT INTO ideas (board_id, title, pitch, kind, source_url, x, y, generation, origin_idea_id, origin_board_id, lift_type, lift_from, lift_base, lift_arm)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            `INSERT INTO ideas (board_id, title, pitch, kind, source_url, x, y, generation, origin_idea_id, origin_board_id, lift_type, lift_from, lift_base, lift_arm, escape_kw)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           )
           .run(
             i.boardId, i.title, i.pitch, i.kind, i.sourceUrl ?? null, i.x, i.y, i.generation, i.originIdeaId ?? null, i.originBoardId ?? null,
-            i.lift?.type ?? null, i.lift?.from ?? null, i.lift?.base ?? null, i.lift?.arm ?? null,
+            i.lift?.type ?? null, i.lift?.from ?? null, i.lift?.base ?? null, i.lift?.arm ?? null, i.escape ?? null,
           );
         const id = Number(lastInsertRowid);
         const edge = db.prepare('INSERT OR IGNORE INTO edges (board_id, from_id, to_id) VALUES (?, ?, ?)');

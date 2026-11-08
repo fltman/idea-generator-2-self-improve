@@ -187,6 +187,80 @@ export function doubtPenalty(idea) {
   return band ? band.gap / 2 : 0;
 }
 
+// ---------------------------------------------------------------- diversity pressure
+//
+// Tournament selection keeps crossing the strongest ideas, and the strongest
+// ideas tend to share one lineage and one theme, so a board can drift into a
+// monoculture. The jury tags every idea with 2–4 keywords from a shared
+// vocabulary; the share of recent bred ideas that carry the most common one
+// measures how concentrated the board is. Above MONOCULTURE_SHARE the
+// autopilot takes at least one parent from outside that theme (or expands an
+// idea outside it). Within that pool the tournament still ranks by breedScore.
+
+/** How many recent bred ideas the gauge looks at. */
+export const DIVERSITY_WINDOW = 24;
+/** Fewer keyworded bred ideas than this, and no monoculture is declared. */
+export const DIVERSITY_MIN = 12;
+/** Share of the window carrying one keyword at which the pressure kicks in. */
+export const MONOCULTURE_SHARE = 0.6;
+
+/** Bred ideas the jury has tagged, oldest first (seeds and guests excluded, as in evolutionStats). */
+function tagged(ideas) {
+  return ideas.filter((i) => i.kind !== 'seed' && i.kind !== 'guest' && i.keywords?.length).sort((a, b) => a.id - b.id);
+}
+
+/** The keyword carried by most of these ideas (alphabetical on a tie) and its share. */
+function concentration(list) {
+  const counts = new Map();
+  for (const i of list) for (const k of new Set(i.keywords)) counts.set(k, (counts.get(k) ?? 0) + 1);
+  let keyword = null, count = 0;
+  for (const [k, n] of counts) if (n > count || (n === count && k < keyword)) [keyword, count] = [k, n];
+  return { keyword, count, total: list.length, share: list.length ? count / list.length : 0 };
+}
+
+/**
+ * How concentrated the board is now: the dominant keyword among the last
+ * `window` bred ideas, its share, and whether that is a monoculture.
+ * @returns {{keyword:string|null, count:number, total:number, share:number, monoculture:boolean}}
+ */
+export function diversity(ideas, window = DIVERSITY_WINDOW) {
+  const recent = tagged(ideas).slice(-window);
+  const c = concentration(recent);
+  return { ...c, monoculture: recent.length >= DIVERSITY_MIN && c.share >= MONOCULTURE_SHARE };
+}
+
+/** The gauge over time: after each bred idea (from the DIVERSITY_MIN-th on), the dominant keyword's share of the window ending there. */
+export function diversitySeries(ideas, window = DIVERSITY_WINDOW) {
+  const list = tagged(ideas);
+  const out = [];
+  for (let n = DIVERSITY_MIN; n <= list.length; n++) {
+    const c = concentration(list.slice(Math.max(0, n - window), n));
+    out.push({ id: list[n - 1].id, at: list[n - 1].createdAt ?? null, keyword: c.keyword, share: c.share, monoculture: c.share >= MONOCULTURE_SHARE });
+  }
+  return out;
+}
+
+/**
+ * When the current monoculture began (the first point of the latest run above
+ * the line, null if the board is not in one now), and what the pressure has
+ * done since: breeds the autopilot made outside the theme (idea.escape), and
+ * of those judged, how many really left it (the jury did not tag them with it).
+ */
+export function pressureStats(ideas, window = DIVERSITY_WINDOW) {
+  const series = diversitySeries(ideas, window);
+  let start = null;
+  for (let n = series.length - 1; n >= 0 && series[n].monoculture; n--) start = series[n];
+  const escapes = ideas.filter((i) => i.escape);
+  const judged = escapes.filter((i) => i.keywords?.length);
+  return {
+    since: start ? { id: start.id, at: start.at, keyword: start.keyword } : null,
+    escapes: escapes.length,
+    judged: judged.length,
+    left: judged.filter((i) => !i.keywords.includes(i.escape)).length,
+    last: escapes.length ? escapes.reduce((a, b) => (b.id > a.id ? b : a)) : null,
+  };
+}
+
 function tournament(pool, k, rng, stats) {
   let best = null;
   for (let i = 0; i < k; i++) {
@@ -200,8 +274,9 @@ function tournament(pool, k, rng, stats) {
  * @param {Array} ideas  ideas on the board (with id, kind, scores)
  * @param {Array} edges  {from, to}
  * @param {object} opts  rng, busy (Set of ids being worked on), inFlight (Set of pair keys),
- *                       mutationRate, k (tournament size)
- * @returns {{type:'combine', a, b} | {type:'expand', idea} | null}
+ *                       mutationRate, k (tournament size), diversity (false: no diversity pressure)
+ * @returns {{type:'combine', a, b, escape?} | {type:'expand', idea, escape?} | null}
+ *          escape: the dominant keyword, when the move takes a parent from outside a monoculture.
  */
 export function nextMove(ideas, edges, opts = {}) {
   const { rng = Math.random, busy = new Set(), inFlight = new Set(), mutationRate = 0.2, k = 3 } = opts;
@@ -210,27 +285,36 @@ export function nextMove(ideas, edges, opts = {}) {
   const used = usedPairs(ideas, edges);
   const stats = liftStats(ideas);
 
-  const bestUnexpanded = () =>
-    [...pool].sort((a, b) => fitness(b) - fitness(a)).find((i) => !expanded.has(i.id));
+  // Diversity pressure: in a monoculture, one parent comes from outside the theme.
+  const div = opts.diversity === false ? null : diversity(ideas);
+  const theme = div?.monoculture ? div.keyword : null;
+  const outside = theme ? pool.filter((i) => !i.keywords?.includes(theme)) : [];
+  const isOut = new Set(outside.map((i) => i.id));
+  const mark = (m) => (theme && [m.idea, m.a, m.b].some((p) => p && isOut.has(p.id)) ? { ...m, escape: theme } : m);
+
+  const bestUnexpanded = (from) =>
+    [...from].sort((a, b) => fitness(b) - fitness(a)).find((i) => !expanded.has(i.id));
+  const bestToExpand = () => (outside.length && bestUnexpanded(outside)) || bestUnexpanded(pool);
 
   if (pool.length < 3 || rng() < mutationRate) {
-    const idea = bestUnexpanded();
-    if (idea) return { type: 'expand', idea };
+    const idea = bestToExpand();
+    if (idea) return mark({ type: 'expand', idea });
   }
 
   if (pool.length >= 2) {
+    const first = outside.length ? outside : pool;
     for (let attempt = 0; attempt < 40; attempt++) {
-      const a = tournament(pool, k, rng, stats);
+      const a = tournament(first, k, rng, stats);
       const rest = pool.filter((i) => i.id !== a.id);
       const b = tournament(rest, k, rng, stats);
       const key = pairKey(a.id, b.id);
       if (used.has(key) || inFlight.has(key)) continue;
-      return { type: 'combine', a, b };
+      return mark({ type: 'combine', a, b });
     }
   }
 
-  const idea = bestUnexpanded();
-  return idea ? { type: 'expand', idea } : null;
+  const idea = bestToExpand();
+  return idea ? mark({ type: 'expand', idea }) : null;
 }
 
 /**

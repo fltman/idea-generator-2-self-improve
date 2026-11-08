@@ -123,3 +123,34 @@ test('autoStep with the real engine: judge first, grow a small pool, then breed'
   assert.ok(ideas.every((i) => i.judgedAt), 'every step leaves its ideas judged');
   assert.ok(ideas.some((i) => i.kind === 'combine' && i.generation >= 2));
 });
+
+test('autoStep in a keyword monoculture breeds outside it and marks the child', async () => {
+  const repo = openDb(':memory:');
+  const chat = async (r: ChatRequest) => {
+    const value =
+      r.schemaName === 'expand' ? { ideas: [1, 2].map((k) => ({ title: `Ny ${k}`, pitch: 'p' })) }
+      : r.schemaName === 'judgement' ? { reason: 'r', originality: 3, feasibility: 3, impact: 3, keywords: ['fresh'] }
+      : { title: 'Korsning', pitch: 'p' };
+    return { value, costUsd: 0 };
+  };
+  const engine = createEngine({ repo, chat, settings: () => DEFAULT_APP_SETTINGS, gitInit: false });
+  const board = repo.createBoard({ title: 'B' });
+  const add = (title: string, sum: number, kw: string[]) => {
+    const i = repo.insertIdea({ boardId: board.id, title, pitch: '', kind: 'expand', x: 0, y: 0, generation: 1 });
+    repo.saveJudgement(i.id, { originality: sum - 8, feasibility: 4, impact: 4, reason: 'r' });
+    repo.setKeywords(i.id, kw);
+    return i;
+  };
+  // 14 strong ideas share one theme; 2 weaker ones do not.
+  for (let n = 0; n < 14; n++) add(`Recept ${n}`, 12, ['lift recipe', n % 2 ? 'jury' : 'evolution']);
+  const out = [add('Annat A', 10, ['camera']), add('Annat B', 9, ['export'])];
+  for (let step = 0; step < 3; step++) {
+    const r = await engine.autoStep(board.id);
+    assert.ok(r.did === 'combine' || r.did === 'expand', r.did);
+    const kids = r.ids!.map((id) => repo.getIdea(id)!);
+    assert.ok(kids.every((k) => k.escape === 'lift recipe'), `step ${step}: the child remembers the monoculture it escaped`);
+    const parents = repo.listEdges(board.id).filter((e) => r.ids!.includes(e.to)).map((e) => e.from);
+    assert.ok(parents.some((p) => !repo.getIdea(p)!.keywords.includes('lift recipe')), `a parent from outside the theme: ${parents}`);
+  }
+  assert.ok(repo.listEdges(board.id).some((e) => out.some((o) => o.id === e.from)), 'the neglected ideas got children');
+});

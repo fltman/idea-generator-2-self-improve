@@ -527,6 +527,9 @@ test('lift recipes: an old database gets the new columns', async () => {
   assert.equal(r.getIdea(i.id)!.retrial!.originality, 2, 'the retrial column was added too');
   const k = r.insertIdea({ boardId: b.id, title: 'K', pitch: '', kind: 'expand', x: 0, y: 0, generation: 1, lift: { type: 'impact', from: i.id, base: 1, arm: 'placebo' } }, [i.id]);
   assert.equal(r.getIdea(k.id)!.liftArm, 'placebo', 'the lift_arm column was added too');
+  const e = r.insertIdea({ boardId: b.id, title: 'E', pitch: '', kind: 'expand', x: 0, y: 0, generation: 1, escape: 'lift recipe' }, [i.id]);
+  assert.equal(r.getIdea(e.id)!.escape, 'lift recipe', 'the escape column was added too');
+  assert.equal(got.escape, null);
 });
 
 test('second opinion: an edge verdict on a self-improvement board is re-scored blind by the retrial model', async () => {
