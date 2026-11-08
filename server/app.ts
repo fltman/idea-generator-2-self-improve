@@ -11,7 +11,7 @@ import { AppError, type Engine } from './engine.ts';
 import type { Autopilot } from './autopilot.ts';
 import type { Builder } from './builder.ts';
 import { PROVIDERS, keySource, listModels, mergeAppSettings, type AppSettings, type ProviderId } from './providers.ts';
-import { fitness, medal, scoreSum } from '../public/js/score.js';
+import { fitness, medal, scoreSum, goldGate, retrialSum } from '../public/js/score.js';
 
 export type Runtime = {
   get(): AppSettings;
@@ -312,6 +312,11 @@ export function createHandler({ repo, engine, autopilot, runtime, publicDir, bui
       enabled: !!builder,
       builds: (builder?.list() ?? repo.listBuilds()).map((b) => ({ ...b, shots: shotsOf(b.journalDir) })),
       active: builder?.active() ?? null,
+      // Jury golds the blind second judge did not agree with: they wait for a human to start them.
+      contested: repo.listBoards().filter((b) => b.config.selfImprove)
+        .flatMap((b) => repo.listIdeas(b.id))
+        .filter((i) => goldGate(i) === 'contested' && !repo.latestBuildFor(i.id))
+        .map((i) => ({ id: i.id, boardId: i.boardId, title: i.title, pitch: i.pitch, first: scoreSum(i), second: retrialSum(i), model: i.retrial?.model ?? null })),
     })],
     ['GET', /^\/api\/builds\/(\d+)$/, ([id]) => {
       const build = repo.getBuild(+id);

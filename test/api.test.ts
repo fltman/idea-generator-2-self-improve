@@ -536,6 +536,28 @@ test('second opinion: an edge verdict on a self-improvement board is re-scored b
   }
 });
 
+test('contested gold: a 13 the second judge put below gold is listed for a human in /api/builds', async () => {
+  try {
+    judgeScores = { originality: 5, feasibility: 4, impact: 4 }; // 13
+    retrialScores = { originality: 4, feasibility: 4, impact: 4 }; // 12
+    const b = await newBoard();
+    await api('PATCH', `/api/boards/${b.id}`, { config: { selfImprove: true } });
+    const s = await seed(b.id, 'Omstritt guld');
+    await engine.idle();
+    const { data } = await api('GET', '/api/builds');
+    const c = data.contested.find((x: any) => x.id === s.id);
+    assert.deepEqual([c.first, c.second, c.model, c.boardId], [13, 12, 'claudecode:opus', b.id]);
+    // Agreement is not contested.
+    retrialScores = { originality: 5, feasibility: 4, impact: 4 };
+    const ok = await seed(b.id, 'Enigt guld');
+    await engine.idle();
+    assert.equal((await api('GET', '/api/builds')).data.contested.some((x: any) => x.id === ok.id), false);
+  } finally {
+    judgeScores = { originality: 3, feasibility: 3, impact: 3 };
+    retrialScores = null;
+  }
+});
+
 test('second opinion: on other boards only by hand, and only for judged ideas', async () => {
   try {
     judgeScores = { originality: 5, feasibility: 4, impact: 4 }; // 13: gold edge, but an ordinary board

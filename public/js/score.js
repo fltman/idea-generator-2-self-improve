@@ -82,3 +82,21 @@ export function confidenceBand(idea) {
   const low = Math.min(a, b), high = Math.max(a, b);
   return { first: a, second: b, low, high, gap: high - low, medals: [medalFromSum(low), medalFromSum(high)], agree: medalFromSum(a) === medalFromSum(b) };
 }
+
+/**
+ * Whether a jury gold may be built (self-improvement boards). A gold sum of
+ * exactly 13 is one point from silver, so it waits for the blind second judge:
+ *   'build'     clear gold (14–15): build at once
+ *   'waiting'   gold on the edge, no second opinion yet
+ *   'agreed'    the second judge also gave gold: build
+ *   'contested' the second judge gave less: wait for a human
+ * null when the idea is not a jury gold (a hand-set medal is the human's call).
+ */
+export function goldGate(idea) {
+  if (Number.isInteger(idea?.medalOverride)) return null;
+  if (medalFromSum(scoreSum(idea)) !== 3) return null;
+  if (!onMedalEdge(idea)) return 'build';
+  const r = retrialSum(idea);
+  if (r == null) return 'waiting';
+  return medalFromSum(r) === 3 ? 'agreed' : 'contested';
+}

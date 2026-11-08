@@ -175,7 +175,8 @@ test('the engine sends gold on a self-improvement board to the builder, with the
   const gold: number[] = [];
   const chat = async (r: ChatRequest) => {
     seen.push(r);
-    const value = r.schemaName === 'judgement' ? { reason: 'r', originality: 5, feasibility: 4, impact: 4, keywords: ['x'] }
+    // 14: a clear gold, built at once (a 13 waits for the second judge; see the next test).
+    const value = r.schemaName === 'judgement' ? { reason: 'r', originality: 5, feasibility: 5, impact: 4, keywords: ['x'] }
       : { ideas: [{ title: 'A', pitch: 'a' }, { title: 'B', pitch: 'b' }, { title: 'C', pitch: 'c' }] };
     return { value, costUsd: 0 };
   };
@@ -199,4 +200,44 @@ test('the engine sends gold on a self-improvement board to the builder, with the
   await engine.judge(plain.id);
   assert.deepEqual(gold.filter((id) => id === plain.id), [], 'other boards never build into the app');
   assert.doesNotMatch(seen[0].system, /APP CONTEXT/);
+});
+
+test('a jury gold on the edge waits for the blind second judge: built if both say gold, contested if not', async () => {
+  const { judge, retrial } = DEFAULT_APP_SETTINGS.models;
+  assert.notEqual(judge, retrial, 'the defaults use two different judges');
+  const gold: { id: number; by: string }[] = [];
+  let second = { originality: 5, feasibility: 4, impact: 4 };
+  let release!: () => void;
+  let held = new Promise<void>((r) => (release = r));
+  const chat = async (r: ChatRequest) => {
+    if (r.model === retrial) await held; // the second judge answers when the test lets it
+    const s = r.model === retrial ? second : { originality: 5, feasibility: 4, impact: 4 }; // the jury: exactly 13
+    return { value: { reason: 'r', ...s, keywords: ['x'] }, costUsd: 0 };
+  };
+  const engine = createEngine({ repo, chat, settings: () => DEFAULT_APP_SETTINGS, gitInit: false, onGold: (i, by) => gold.push({ id: i.id, by }) });
+  const events: any[] = [];
+  engine.bus.on(selfBoard.id, (e) => events.push(e));
+
+  // Agreed: no build until the second judge has answered, then one by the jury.
+  const agreed = idea('Edge gold, agreed');
+  await engine.judge(agreed.id);
+  assert.deepEqual(gold, [], 'a 13 does not build before the second opinion');
+  release();
+  await engine.idle();
+  assert.deepEqual(gold, [{ id: agreed.id, by: 'jury' }]);
+
+  // Contested: the second judge says silver, so nothing is built and the board hears about it.
+  second = { originality: 4, feasibility: 4, impact: 4 };
+  held = Promise.resolve();
+  const contested = idea('Edge gold, contested');
+  await engine.judge(contested.id);
+  await engine.idle();
+  assert.deepEqual(gold.map((g) => g.id), [agreed.id], 'a contested gold waits for a human');
+  const e = events.find((x) => x.type === 'contested');
+  assert.deepEqual([e.ideaId, e.first, e.second], [contested.id, 13, 12]);
+  assert.equal(repo.getIdea(contested.id)!.originality, 5, "the jury's medal is untouched");
+
+  // A person can still hand it gold, which builds at once.
+  engine.setMedal(contested.id, 3);
+  assert.deepEqual(gold.at(-1), { id: contested.id, by: 'hand' });
 });

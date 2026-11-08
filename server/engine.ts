@@ -11,7 +11,7 @@ import { asUrl, fetchPage as realFetchPage } from './extract.ts';
 import { fetchPapers as realFetchPapers, researchLeads, xLeads } from './leads.ts';
 import { writeBrief, writeProject } from './project.ts';
 import { ProviderError, type AppSettings, type ChatFn, type Role } from './providers.ts';
-import { fitness, isJudged, medal, scoreSum, onMedalEdge } from '../public/js/score.js';
+import { fitness, isJudged, medal, scoreSum, onMedalEdge, goldGate } from '../public/js/score.js';
 import { nextMove, recipeOf, pickRecipe, liftStats } from '../public/js/evolve.js';
 
 export class AppError extends Error {
@@ -166,7 +166,8 @@ export function createEngine(deps: Deps) {
       const out: { idea: Idea; project?: string; projectError?: string } = { idea: repo.setKeywords(idea.id, judgement.keywords)! };
       // Gold on a self-improvement board goes to the builder, which builds it into this app.
       if (board.config.selfImprove && medal(out.idea) === 3) {
-        deps.onGold?.(out.idea, 'jury');
+        // A gold on the edge (exactly 13) waits for the blind second judge; retrial() builds it if both agree.
+        if (!autoRetrial(board, out.idea)) deps.onGold?.(out.idea, 'jury');
       } else if (board.config.autoProjectOnGold && medal(out.idea) === 3 && !out.idea.projectPath) {
         // The judge itself turns gold into a Claude Code project, if the board allows it.
         try {
@@ -235,6 +236,12 @@ export function createEngine(deps: Deps) {
         originality: j.originality, feasibility: j.feasibility, impact: j.impact, reason: j.reason, model, at: new Date().toISOString(),
       })!;
       emitIdeas(board.id, [saved]);
+      // A held gold: both judges say gold, so it is built; otherwise it is contested and waits for a human.
+      if (board.config.selfImprove) {
+        const gate = goldGate(saved);
+        if (gate === 'agreed') deps.onGold?.(saved, 'jury');
+        else if (gate === 'contested') bus.emit(board.id, { type: 'contested', ideaId: saved.id, title: saved.title, first: scoreSum(saved), second: j.originality + j.feasibility + j.impact });
+      }
       return { idea: saved };
     } finally {
       retrying.delete(idea.id);

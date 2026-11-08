@@ -212,3 +212,16 @@ test('second opinion: disagreement lowers the breeding score by half the gap, ei
   // The medal itself stays the jury's.
   assert.equal(medal(idea(2, 13, second(1, 4, 4))), 3);
 });
+
+test('gold gate: a jury gold on the edge waits for the second judge; only agreement builds', async () => {
+  const { goldGate } = await import('../public/js/score.js');
+  assert.equal(goldGate(idea(1, 12)), null, 'silver is not gold');
+  assert.equal(goldGate(idea(1, null)), null, 'not judged');
+  assert.equal(goldGate(idea(1, 14)), 'build', 'clear gold builds at once');
+  assert.equal(goldGate(idea(1, 13)), 'waiting', 'on the edge: wait for the second judge');
+  assert.equal(goldGate(idea(1, 13, second(5, 4, 4))), 'agreed');
+  assert.equal(goldGate(idea(1, 13, second(5, 5, 5))), 'agreed', 'a higher second opinion is still gold');
+  assert.equal(goldGate(idea(1, 13, second(4, 4, 4))), 'contested');
+  assert.equal(goldGate(idea(1, 13, { ...second(1, 1, 1), medalOverride: 3 })), null, 'a hand-set gold is the human\'s call');
+  assert.equal(goldGate(idea(1, 13, { retrial: { originality: 4, feasibility: 'x', impact: 4 } })), 'waiting', 'a malformed opinion is no opinion');
+});
