@@ -172,6 +172,8 @@ table.style-table .style-early td:nth-child(3) { color: var(--text-2); }
 .applied-cells { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 4px; font-variant-numeric: tabular-nums; }
 .applied-cell.applied b { color: #5fd38d; }
 .applied-cell.ignored b { color: #e58a7a; }
+/* Scrap heap (build 0012): the two medal rates one under the other, then the gap. */
+.scrap-overview .applied-cells { flex-direction: column; gap: 2px; margin-bottom: 4px; }
 .duel { margin-top: 6px; font-size: 12px; }
 .duel-head { color: var(--text-2); }
 .duel-badges { display: flex; flex-wrap: wrap; gap: 6px; margin: 4px 0; font-variant-numeric: tabular-nums; }

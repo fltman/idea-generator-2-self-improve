@@ -6,7 +6,7 @@
 import { execFile } from 'node:child_process';
 import { appendFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import type { Repo, Idea, Board } from './db.ts';
+import type { Repo, Idea, Board, Scrap } from './db.ts';
 import { makeLLM } from './llm.ts';
 import { asUrl, fetchPage as realFetchPage } from './extract.ts';
 import { fetchPapers as realFetchPapers, researchLeads, xLeads } from './leads.ts';
@@ -14,7 +14,7 @@ import { slugify, writeBrief, writeProject } from './project.ts';
 import { RepoError, scanRepo, scanText, shortPath } from './reposcan.ts';
 import { ProviderError, type AppSettings, type ChatFn, type Role } from './providers.ts';
 import { fitness, isJudged, medal, scoreSum, onMedalEdge, goldGate } from '../public/js/score.js';
-import { nextMove, assignArm, liftStats, armOf, controlDue, drawStyle, sporeDue, pickSpore, sporeTarget } from '../public/js/evolve.js';
+import { nextMove, assignArm, liftStats, armOf, controlDue, drawStyle, sporeDue, pickSpore, sporeTarget, scrapDue, drawScrap } from '../public/js/evolve.js';
 
 export class AppError extends Error {
   status: number;
@@ -89,6 +89,8 @@ type Deps = {
   styleRng?: () => number;
   /** Spores: the draw that breaks ties between equally fitting target boards (tests fix it). */
   sporeRng?: () => number;
+  /** Scrap heap: the lot that picks which wilted idea is drawn (tests fix it). */
+  scrapRng?: () => number;
   /** Codebase boards: the folder gold logs go to unless a board names its own file (default data/gold). */
   goldRoot?: string;
 };
@@ -103,6 +105,7 @@ export function createEngine(deps: Deps) {
   const duelRng = deps.duelRng ?? Math.random;
   const styleRng = deps.styleRng ?? Math.random;
   const sporeRng = deps.sporeRng ?? Math.random;
+  const scrapRng = deps.scrapRng ?? Math.random;
   const bus = createBus();
   const judging = new Set<number>();
 
@@ -516,8 +519,14 @@ export function createEngine(deps: Deps) {
     return { ideas: created, edges };
   }
 
-  /** `forced`: a task chosen by the caller instead of assignArm's (the autopilot's control sibling). */
-  async function doCombine(boardId: number, aId: number, bId: number, escape: string | null = null, forced: ReturnType<typeof assignArm> = null) {
+  /**
+   * `forced`: a task chosen by the caller instead of assignArm's (the autopilot's control sibling, the scrap draw).
+   * `scrap`: the scrap draw's record, stored on the child.
+   */
+  async function doCombine(
+    boardId: number, aId: number, bId: number, escape: string | null = null,
+    forced: ReturnType<typeof assignArm> = null, scrap: Scrap | null = null,
+  ) {
     const board = mustBoard(boardId);
     if (!Number.isInteger(aId) || !Number.isInteger(bId) || aId === bId) throw new AppError(400, 'bad_pair', 'Pick two different ideas');
     const a = mustIdea(aId);
@@ -535,9 +544,11 @@ export function createEngine(deps: Deps) {
         boardId: board.id, ...idea, kind: 'combine',
         x: (a.x + c.x) / 2 + (-dy / len) * 70, y: (a.y + c.y) / 2 + (dx / len) * 70,
         generation: Math.max(a.generation, c.generation) + 1,
-        lift: task ? { type: task.type, from: task.from.id, base: task.base, arm: task.arm } : null,
+        // A scrap child is in no trial arm: its task is a jury reason, not a recipe, so it must not touch the trials.
+        lift: task && task.arm !== 'scrap' ? { type: task.type, from: task.from.id, base: task.base, arm: task.arm } : null,
         escape,
         style,
+        scrap,
       },
       [a.id, c.id],
     );
@@ -854,11 +865,38 @@ export function createEngine(deps: Deps) {
     /** One autopilot step, then (on a spore board, when due) a spore. A failed spore never fails the step. */
     async autoStep(boardId: number) {
       const r = await api.breedStep(boardId);
+      // The scrap heap: after a breed when due, or whenever the autopilot had nothing else to do.
+      if (r.did === 'expand' || r.did === 'combine' || r.reason === 'nothing_to_do') {
+        await api.maybeScrap(boardId, r.reason === 'nothing_to_do').catch((e) => console.log(`[scrap] board ${boardId}: ${e?.message ?? e}`));
+      }
       if (r.did !== 'idle') await maybeSpore(boardId).catch((e) => console.log(`[spore] board ${boardId}: ${e?.message ?? e}`));
       return r;
     },
 
     maybeSpore,
+
+    /**
+     * Scrap heap (build 0012): on a board with it on, every SCRAP_EVERY bred
+     * ideas (or at once when `idle`) draw one wilted idea (drawScrap() in
+     * evolve.js) and cross it with the fittest living idea through the
+     * ordinary cross prompt, the jury's reason for the wilted idea as the
+     * task. The child stores `scrap` and is judged here. null: nothing drawn.
+     */
+    async maybeScrap(boardId: number, idle = false) {
+      const board = mustBoard(boardId);
+      if (!board.config.scrapHeap) return null;
+      const ideas = repo.listIdeas(boardId);
+      if (!idle && !scrapDue(ideas)) return null;
+      const draw = drawScrap(ideas, repo.listEdges(boardId), scrapRng);
+      if (!draw?.partner) return null;
+      const { wilt, partner, distance } = draw;
+      const task = { arm: 'scrap', type: null, change: wilt.reason, from: wilt, base: medal(wilt) };
+      const scrap = { from: wilt.id, distance: distance == null ? null : Math.round(distance * 100) / 100, at: new Date().toISOString() };
+      const r = await doCombine(boardId, wilt.id, partner.id, null, task, scrap);
+      bus.emit(boardId, { type: 'scrap', ideaId: r.idea.id, from: wilt.id, partner: partner.id, distance: scrap.distance });
+      await judge(r.idea.id);
+      return { idea: repo.getIdea(r.idea.id)!, wilt, partner, distance: scrap.distance };
+    },
 
     async breedStep(boardId: number): Promise<{ did: 'idle' | 'judge' | 'expand' | 'combine'; reason?: string; ids?: number[] }> {
       mustBoard(boardId);

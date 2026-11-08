@@ -200,6 +200,8 @@ export type BoardConfig = {
   wordingGap: boolean;
   /** Spores: the autopilot now and then sends a strong idea to the spore board where it fits best, and this board takes spores in. */
   spores: boolean;
+  /** Scrap heap (build 0012): every SCRAP_EVERY bred ideas the autopilot crosses one wilted idea, with the jury's reason for it as the task. */
+  scrapHeap: boolean;
   /**
    * Self-improvement: ideas on this board are changes to this app. Prompts get
    * the app's current feature list, and gold ideas go to the Claude Code
@@ -254,6 +256,7 @@ export function defaultConfig(template = DEFAULT_TEMPLATES[0]): BoardConfig {
     autoProjectOnGold: true,
     wordingGap: false,
     spores: false,
+    scrapHeap: false,
     selfImprove: false,
     buildsPerDay: 4,
     buildModel: 'opus',
@@ -306,6 +309,7 @@ export function mergeConfig(base: BoardConfig, raw: any): BoardConfig {
     autoProjectOnGold: b(r.autoProjectOnGold, base.autoProjectOnGold),
     wordingGap: b(r.wordingGap, base.wordingGap),
     spores: b(r.spores, base.spores ?? false),
+    scrapHeap: b(r.scrapHeap, base.scrapHeap ?? false),
     selfImprove: b(r.selfImprove, base.selfImprove),
     buildsPerDay: Number.isFinite(Number(r.buildsPerDay)) && r.buildsPerDay !== null && r.buildsPerDay !== ''
       ? Math.min(50, Math.max(0, Math.round(Number(r.buildsPerDay)))) : base.buildsPerDay,
@@ -360,8 +364,11 @@ export type Idea = {
   spore: boolean;
   /** Wording gap (build 0011): the judge model's plain rewrite of this idea and the jury prompt's blind scores for it. The gap is the jury's sum minus the plain sum (plainGap() in evolve.js). null: not rescored. */
   plain: Plain | null;
+  /** Scrap heap (build 0012): bred by the scrap draw from a wilted idea (`from`), with that idea's keyword distance from the living pool at the draw. null: an ordinary idea. */
+  scrap: Scrap | null;
   createdAt: string;
 };
+export type Scrap = { from: number; distance: number | null; at: string };
 export type Plain = { title: string; pitch: string; originality: number; feasibility: number; impact: number; reason: string; model: string; at: string };
 export type DuelWinner = 'child' | 'parent' | 'tie';
 export type Duel = { originality: DuelWinner; feasibility: DuelWinner; impact: DuelWinner; reason: string; childFirst: boolean; model: string; at: string };
@@ -445,6 +452,7 @@ const ideaFromRow = (r: any): Idea => ({
   style: r.style ?? null,
   spore: !!r.spore,
   plain: r.plain ? parseJson(r.plain) : null,
+  scrap: r.scrap ? parseJson(r.scrap) : null,
   createdAt: r.created_at,
 });
 
@@ -493,7 +501,7 @@ export function openDb(file: string) {
   db.exec(SCHEMA);
   // Databases from before lift recipes: add the columns (SQLite has no ADD COLUMN IF NOT EXISTS).
   const ideaCols = new Set((db.prepare('PRAGMA table_info(ideas)').all() as any[]).map((c) => c.name));
-  for (const [name, type] of [['recipe_type', 'TEXT'], ['recipe', 'TEXT'], ['lift_type', 'TEXT'], ['lift_from', 'INTEGER'], ['lift_base', 'INTEGER'], ['retrial', 'TEXT'], ['lift_arm', 'TEXT'], ['escape_kw', 'TEXT'], ['lift_applied', 'INTEGER'], ['lift_check', 'TEXT'], ['duel', 'TEXT'], ['style', 'TEXT'], ['plain', 'TEXT'], ['spore', 'INTEGER']]) {
+  for (const [name, type] of [['recipe_type', 'TEXT'], ['recipe', 'TEXT'], ['lift_type', 'TEXT'], ['lift_from', 'INTEGER'], ['lift_base', 'INTEGER'], ['retrial', 'TEXT'], ['lift_arm', 'TEXT'], ['escape_kw', 'TEXT'], ['lift_applied', 'INTEGER'], ['lift_check', 'TEXT'], ['duel', 'TEXT'], ['style', 'TEXT'], ['plain', 'TEXT'], ['spore', 'INTEGER'], ['scrap', 'TEXT']]) {
     if (!ideaCols.has(name)) db.exec(`ALTER TABLE ideas ADD COLUMN ${name} ${type}`);
   }
 
@@ -594,18 +602,20 @@ export function openDb(file: string) {
         escape?: string | null;
         style?: string | null;
         spore?: boolean;
+        scrap?: Scrap | null;
       },
       parentIds: number[] = [],
     ): Idea {
       return tx(() => {
         const { lastInsertRowid } = db
           .prepare(
-            `INSERT INTO ideas (board_id, title, pitch, kind, source_url, x, y, generation, origin_idea_id, origin_board_id, lift_type, lift_from, lift_base, lift_arm, escape_kw, style, spore)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            `INSERT INTO ideas (board_id, title, pitch, kind, source_url, x, y, generation, origin_idea_id, origin_board_id, lift_type, lift_from, lift_base, lift_arm, escape_kw, style, spore, scrap)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           )
           .run(
             i.boardId, i.title, i.pitch, i.kind, i.sourceUrl ?? null, i.x, i.y, i.generation, i.originIdeaId ?? null, i.originBoardId ?? null,
             i.lift?.type ?? null, i.lift?.from ?? null, i.lift?.base ?? null, i.lift?.arm ?? null, i.escape ?? null, i.style ?? null, i.spore ? 1 : null,
+            i.scrap ? JSON.stringify(i.scrap) : null,
           );
         const id = Number(lastInsertRowid);
         const edge = db.prepare('INSERT OR IGNORE INTO edges (board_id, from_id, to_id) VALUES (?, ?, ?)');
