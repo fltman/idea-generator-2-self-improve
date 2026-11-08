@@ -100,6 +100,21 @@ a { color: var(--accent); }
 .ap-chip.busy::before { content: '● '; color: var(--good); }
 .ap-chip.warn { color: var(--gold); }
 
+/* ---------- pause banner (build 0014): above the canvas and every overlay view */
+#pause-banner {
+  position: fixed; top: 58px; left: 50%; transform: translateX(-50%); z-index: 35;
+  width: min(760px, calc(100% - 32px)); display: flex; align-items: center; gap: 14px;
+  background: rgba(38, 32, 14, .97); border: 1px solid #6b5a1e; border-left: 4px solid var(--gold);
+  border-radius: var(--radius); padding: 10px 14px; box-shadow: 0 12px 32px rgba(0,0,0,.5);
+}
+#pause-banner[hidden] { display: none; }
+#pause-banner .pb-text { flex: 1; min-width: 0; display: grid; gap: 2px; }
+#pause-banner .pb-title { font-weight: 700; color: var(--gold); }
+#pause-banner .pb-line { font-size: 13px; color: var(--text); }
+#pause-banner .pb-forecast { font-size: 12px; color: var(--text-2); }
+#pause-banner .btn { white-space: nowrap; }
+body.exhibit #pause-banner { display: none; }
+
 /* ---------- layout */
 main { display: flex; min-height: 0; }
 #stage { position: relative; flex: 1; min-width: 0; }

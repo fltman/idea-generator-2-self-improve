@@ -17,6 +17,7 @@ import {
 /** A net lift in medal steps, signed, two decimals: +0.33, −0.50, ±0.00. */
 const signed = (x) => (x > 0 ? '+' : x < 0 ? '−' : '±') + Math.abs(x).toFixed(2);
 const netClass = (net) => (net == null ? 'none' : net > 0 ? 'up' : net < 0 ? 'down' : 'flat');
+import { pauseBanner } from './pause.js';
 import { openDashboard } from './dashboard.js';
 import { openReport } from './report.js';
 import { initBuilds, onBuildEvent, buildFor, startBuild, openBuilds, buildIcon, formatSeq } from './builds.js';
@@ -354,8 +355,85 @@ function renderAutopilot() {
   chip.title = t('apMeta', { n: st.stepsLastHour ?? 0, usd: (st.spentToday ?? S.spentToday ?? 0).toFixed(3) });
   chip.className = `ap-chip ${['error', 'backoff', 'board_budget', 'global_budget', 'hourly'].includes(st.state) ? 'warn' : st.state === 'running' ? 'busy' : ''}`;
   $('#ex-status').textContent = chip.textContent;
+  renderPauseBanner();
 }
 setInterval(() => S.autopilot?.until && renderAutopilot(), 1000);
+
+// ---------------------------------------------------------------- pause banner (build 0014)
+
+let resuming = 0; // when the last resume click went out (0: none pending)
+const dollars = (x, d = 2) => `$${(x ?? 0).toFixed(d)}`;
+
+/**
+ * Over every view (canvas, trends, report, builds): when the autopilot stops at
+ * a cap, name it, its value and when it lifts, and offer one priced raise.
+ */
+function renderPauseBanner() {
+  const el = $('#pause-banner');
+  const st = S.autopilot ?? { state: 'manual' };
+  const fs = flightStats(S.recorder, ideaList());
+  const p = S.board?.config.mode === 'auto' ? pauseBanner({
+    status: st, rate: S.board.config.rate, globalCap: S.settings.maxUsdPerDay,
+    globalSpent: S.providers?.spentToday ?? null, usdPerMedal: fs.total.usdPerMedal, medals: fs.medals,
+  }) : null;
+  if (!p) {
+    resuming = 0;
+    el.hidden = true;
+    el.dataset.key = '';
+    return clear(el);
+  }
+  // A resume that did not take within 10 s (the autopilot ticks every second): offer the button again.
+  if (resuming && Date.now() - resuming > 10_000) resuming = 0;
+  const time = p.until ? new Date(p.until).toLocaleTimeString(getLang() === 'sv' ? 'sv-SE' : 'en-GB', { hour: '2-digit', minute: '2-digit' }) : '?';
+  const hourly = p.cap === 'hourly';
+  const line = hourly
+    ? t('pbHourlyLine', { n: p.spent ?? p.value, cap: p.value, time })
+    : t('pbBudgetLine', { spent: p.spent == null ? '?' : dollars(p.spent, 3), cap: dollars(p.value) });
+  const forecast = hourly
+    ? t('pbHourlyForecast')
+    : p.forecast
+      ? t('pbForecast', { usd: dollars(p.raise.usd), n: p.forecast.medals.toFixed(1), per: dollars(p.forecast.usdPerMedal, 3), basis: p.forecast.basis })
+      : t('pbNoForecast');
+  const label = resuming ? t('pbResuming')
+    : hourly ? t('pbResumeSteps', { by: p.raise.by, to: p.raise.to })
+    : t('pbResumeUsd', { usd: dollars(p.raise.usd), to: dollars(p.raise.to) });
+  const title = t(`pb_${p.cap}`);
+  // This runs every second (the countdown tick): rebuild only when a word changed, so a click is never lost mid-rebuild.
+  const key = [title, line, forecast, label].join('|');
+  el.hidden = false;
+  if (el.dataset.key === key) return;
+  el.dataset.key = key;
+  clear(el,
+    h('div', { class: 'pb-text' },
+      h('span', { class: 'pb-title' }, `⏸ ${title}`),
+      h('span', { class: 'pb-line' }, line),
+      h('span', { class: 'pb-forecast' }, forecast),
+    ),
+    h('button', { class: 'btn primary', disabled: !!resuming, onclick: () => resumeAt(p) }, label),
+  );
+}
+
+/** One click: raise the tripped cap to the banner's figure. The autopilot's next tick resumes. */
+async function resumeAt(p) {
+  if (resuming || CAMERA) return;
+  resuming = Date.now();
+  renderPauseBanner();
+  try {
+    if (p.cap === 'global_budget') {
+      S.settings = { ...S.settings, maxUsdPerDay: p.raise.to };
+      S.providers = await saveSettings(S.settings);
+    } else {
+      const rate = p.cap === 'hourly' ? { stepsPerHour: p.raise.to } : { usdPerDay: p.raise.to };
+      if (!(await patchBoard({ config: { rate } }))) throw new Error('patch failed'); // patchBoard already toasted
+    }
+    toast(t('pbRaised', { to: p.cap === 'hourly' ? String(p.raise.to) : dollars(p.raise.to) }), 'good');
+  } catch (e) {
+    resuming = 0;
+    if (e?.message !== 'patch failed') fail(e);
+    renderPauseBanner();
+  }
+  // On success the button stays disabled until the autopilot's next status hides the banner.
+}
 
 function renderBoardMenu() {
   const menu = $('#board-menu');
