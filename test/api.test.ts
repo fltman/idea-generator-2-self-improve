@@ -15,6 +15,7 @@ const calls: ChatRequest[] = [];
 let judgeScores = { originality: 3, feasibility: 3, impact: 3 };
 let judgeKeywords = ['Public Space', 'sound'];
 let judgeLift: Record<string, string> = {}; // liftType + lift, when a test wants the jury to write a recipe
+let retrialScores: typeof judgeScores | null = null; // what the second judge (the retrial model) answers, when a test sets it
 let failNext: Error | null = null;
 let xCitations: string[] = [];
 
@@ -29,6 +30,7 @@ async function fakeChat(r: ChatRequest) {
   const n = calls.length;
   const value =
     r.schemaName === 'expand' ? { ideas: [1, 2, 3].map((k) => ({ title: `"Barn ${n}.${k}."`, pitch: `Pitch ${k}` })) }
+    : r.schemaName === 'judgement' && retrialScores && r.model === settings.models.retrial ? { reason: 'Andra domaren tvekar.', ...retrialScores, keywords: judgeKeywords }
     : r.schemaName === 'judgement' ? { reason: 'Stark mekanism, oklar kund.', ...judgeScores, keywords: judgeKeywords, ...judgeLift }
     : r.schemaName === 'summary' ? { headline: 'Tavlan rör sig mot ljud.', themes: [{ name: 'Ljud', insight: 'Allt låter.', ideas: ['Lånecyklar'] }], strongest: [{ title: 'Korsning', why: 'Konkret.' }], gaps: ['Ingen tänker på natten.'], nextSteps: ['Korsa A och B.'] }
     : r.schemaName === 'synthesis' ? { headline: 'Bänkarna dominerar.', insights: ['i1', 'i2', 'i3'], standouts: [{ title: 'Sjungande parkbänk', board: 'X', why: 'w' }], opportunities: ['o1', 'o2'], nextSteps: ['n1', 'n2'] }
@@ -472,4 +474,88 @@ test('lift recipes: an old database gets the new columns', async () => {
   r.saveJudgement(i.id, { originality: 3, feasibility: 3, impact: 3, reason: 'r', liftType: 'impact', lift: 'Gör så.' });
   const got = r.getIdea(i.id)!;
   assert.deepEqual([got.recipeType, got.recipe, got.liftType], ['impact', 'Gör så.', null]);
+  assert.equal(got.retrial, null);
+  r.saveRetrial(i.id, { originality: 2, feasibility: 3, impact: 3, reason: 'r2', model: 'm', at: 'now' });
+  assert.equal(r.getIdea(i.id)!.retrial!.originality, 2, 'the retrial column was added too');
+});
+
+test('second opinion: an edge verdict on a self-improvement board is re-scored blind by the retrial model', async () => {
+  const { confidenceBand } = await import('../public/js/score.js');
+  const { breedScore } = await import('../public/js/evolve.js');
+  try {
+    judgeScores = { originality: 4, feasibility: 4, impact: 3 }; // 11: exactly on silver
+    retrialScores = { originality: 3, feasibility: 3, impact: 3 }; // 9
+    const configured = async (config: object) => {
+      const b = await newBoard();
+      return (await api('PATCH', `/api/boards/${b.id}`, { config })).data.board;
+    };
+    const self = await configured({ selfImprove: true });
+    assert.equal(self.config.selfImprove, true);
+    const before = calls.length;
+    const s = await seed(self.id, 'Juryn tvivlar');
+    await engine.idle();
+    const judgeCalls = calls.slice(before).filter((c) => c.schemaName === 'judgement');
+    assert.deepEqual(judgeCalls.map((c) => c.model), ['claudecode:sonnet', 'claudecode:opus'], 'jury first, then the second judge on another model');
+    assert.doesNotMatch(judgeCalls[1].user, /Stark mekanism|11/, 'blind: the second judge never sees the first verdict');
+    const idea = repo.getIdea(s.id)!;
+    assert.deepEqual([idea.retrial!.originality, idea.retrial!.feasibility, idea.retrial!.impact, idea.retrial!.model], [3, 3, 3, 'claudecode:opus']);
+    assert.equal(idea.retrial!.reason, 'Andra domaren tvekar.');
+    assert.equal(idea.originality, 4, "the jury's own scores are untouched");
+    assert.deepEqual(confidenceBand(idea), { first: 11, second: 9, low: 9, high: 11, gap: 2, medals: [1, 2], agree: false });
+    assert.equal(breedScore(idea, {}), 10);
+    // The board payload carries the second opinion, and the export does not break.
+    const { data } = await api('GET', `/api/boards/${self.id}`);
+    assert.equal(data.ideas.find((i: any) => i.id === s.id).retrial.impact, 3);
+    assert.deepEqual(data.retrying, []);
+
+    // Re-judging makes a new verdict: the old second opinion is cleared, then asked again (still on the edge).
+    retrialScores = { originality: 4, feasibility: 4, impact: 3 };
+    await api('POST', `/api/ideas/${s.id}/judge`, {});
+    await engine.idle();
+    assert.equal(confidenceBand(repo.getIdea(s.id)!)!.gap, 0);
+
+    // Off the edge (10): no second opinion.
+    judgeScores = { originality: 4, feasibility: 3, impact: 3 };
+    const n = calls.length;
+    const off = await seed(self.id, 'Mitt emellan');
+    await engine.idle();
+    assert.equal(calls.slice(n).filter((c) => c.schemaName === 'judgement').length, 1);
+    assert.equal(repo.getIdea(off.id)!.retrial, null);
+
+    // Same model for both roles: no point in asking twice.
+    judgeScores = { originality: 3, feasibility: 3, impact: 3 };
+    const same = await configured({ selfImprove: true, models: { retrial: 'claudecode:sonnet' } });
+    assert.equal(same.config.models.retrial, 'claudecode:sonnet');
+    const m = calls.length;
+    await seed(same.id, 'Samma domare');
+    await engine.idle();
+    assert.equal(calls.slice(m).filter((c) => c.schemaName === 'judgement').length, 1);
+  } finally {
+    judgeScores = { originality: 3, feasibility: 3, impact: 3 };
+    retrialScores = null;
+  }
+});
+
+test('second opinion: on other boards only by hand, and only for judged ideas', async () => {
+  try {
+    judgeScores = { originality: 5, feasibility: 4, impact: 4 }; // 13: gold edge, but an ordinary board
+    retrialScores = { originality: 4, feasibility: 3, impact: 4 };
+    const board = await newBoard();
+    await api('PATCH', `/api/boards/${board.id}`, { config: { autoProjectOnGold: false } });
+    const s = await seed(board.id, 'Vanlig tavla');
+    await engine.idle();
+    assert.equal(repo.getIdea(s.id)!.retrial, null, 'no automatic second opinion off self-improvement boards');
+    const r = await api('POST', `/api/ideas/${s.id}/retrial`, {});
+    assert.equal(r.status, 200);
+    assert.equal(r.data.idea.retrial.feasibility, 3);
+    assert.equal(lastCall('judgement').model, 'claudecode:opus');
+
+    const raw = repo.insertIdea({ boardId: board.id, title: 'Obedömd', pitch: '', kind: 'seed', x: 0, y: 0, generation: 0 });
+    const bad = await api('POST', `/api/ideas/${raw.id}/retrial`, {});
+    assert.equal(bad.status, 400);
+    assert.equal(bad.data.error?.code ?? bad.data.code, 'not_judged');
+  } finally {
+    judgeScores = { originality: 3, feasibility: 3, impact: 3 };
+    retrialScores = null;
+  }
 });

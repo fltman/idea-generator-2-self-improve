@@ -37,6 +37,7 @@ seed → branch / cross (claudecode:sonnet) → jury (calibrated, claudecode:son
   - a global USD per day
   - error backoff
 - **Lift recipes with a measured hit rate.** For every idea the jury also writes a *lift recipe*: the one change that would earn it the next medal, typed by the criterion it raises (originality, feasibility or impact). Every child bred from that idea, by hand or by the autopilot, gets the recipe as its task and remembers its parent's medal; once the child is judged, the recipe either lifted the medal or it did not. The idea panel shows the recipe, how often recipes of that type have worked on the board, and for a child its task and ✓/✗. The overview shows the hits per type. Breeding uses the numbers: a cross hands on whichever parent's recipe type has the better record, and in tournament selection the hit rate nudges the score by at most ±0.5, so it breaks ties between ideas the jury scored the same but never outweighs a point of score.
+- **A second opinion on borderline verdicts.** A jury sum exactly on a medal threshold (9, 11 or 13) is one point from a different medal. On a self-improvement board such a verdict is re-scored in the background by a second judge on another model (the *Second judge* role, default `claudecode:opus`), which runs the same judge prompt and never sees the first verdict. The idea panel shows a confidence band on the 3–15 scale with the medal lines, both sums, the second judge's reason and whether the medals agree. The medal stays the jury's, but in tournament selection a disagreement costs the idea half the gap (a 13 that the second judge puts at 11 breeds like a 12). On any board, *Ask a second judge* in the panel does the same by hand. Re-judging clears the old second opinion.
 - **Scouts.**
   - *X trends*: Grok with live X search via OpenRouter. A lead is kept only if its post is among the search engine's own citations.
   - *AI research*: Hugging Face daily and semantic paper search, aimed at the goal.
@@ -51,7 +52,7 @@ seed → branch / cross (claudecode:sonnet) → jury (calibrated, claudecode:son
   - *Dashboard*: keyword trends across boards, with sparklines and drill-down.
   - *Report*: totals, cross-board conclusions, every project with its start command, and one card per board. Exports to Markdown.
 - **Exhibition mode.** Fullscreen, the camera follows new ideas, and visitors type seeds. It runs together with automatic mode.
-- **Providers per role.** Every role has its own model, written `provider:model`. The roles are distill, branch, cross, judge, summary, research scout, X scout and project brief.
+- **Providers per role.** Every role has its own model, written `provider:model`. The roles are distill, branch, cross, judge, summary, research scout, X scout, project brief and second judge.
   - **Claude Code:** `claudecode:sonnet`, `claudecode:opus`, `claudecode:haiku` or a full model ID. Runs the local `claude` CLI headless with no tools and no settings, one process per call (2–5 s).
   - **Hosted:** OpenRouter, Anthropic (official SDK) and OpenAI.
   - **Copilot models:** neither GitHub Copilot nor Microsoft Copilot has a completion API for apps, and GitHub Models was retired on 30 July 2026. GitHub points to Microsoft Foundry, so the models behind both Copilots are reached through the Azure OpenAI / Microsoft Foundry provider.
@@ -66,7 +67,7 @@ Needs Node 25 or newer, which runs TypeScript directly (there is no build step),
 npm install             # one dependency: @anthropic-ai/sdk
 npm run dev             # http://localhost:8301 — restarts itself when a build is merged
 npm run self:setup      # once, in another terminal: creates the self-improvement board (autopilot on)
-npm test                # 73 tests, fake LLM, fake claude CLI, fake agent; no network
+npm test                # 78 tests, fake LLM, fake claude CLI, fake agent; no network
 npm run calibrate       # real judge vs. reference ideas (claudecode:sonnet ≈ $0.13)
 npm run shoot -- --help # the screenshot tool the builder's agent uses
 ```

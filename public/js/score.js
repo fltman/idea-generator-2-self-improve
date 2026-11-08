@@ -47,3 +47,38 @@ export function fitness(idea) {
   if (Number.isInteger(idea?.medalOverride)) return OVERRIDE_FITNESS[idea.medalOverride];
   return scoreSum(idea);
 }
+
+// ---------------------------------------------------------------- second opinion
+//
+// A verdict whose sum sits exactly on a medal threshold (9, 11, 13) is one
+// point from a different medal, so it is the verdict most worth doubting. A
+// second judge, on another model and blind to the first verdict, re-scores it
+// (idea.retrial). The two sums form a confidence band; the medal still comes
+// from the first jury, and the gap only lowers the breeding score (evolve.js).
+
+const EDGES = Object.values(MEDAL_MIN_SUM);
+
+/** Judged by the jury (not hand-medalled) with a sum exactly on a medal threshold. */
+export function onMedalEdge(idea) {
+  if (Number.isInteger(idea?.medalOverride)) return false;
+  return EDGES.includes(scoreSum(idea));
+}
+
+/** The second judge's sum, or null if there is none (or it is malformed). */
+export function retrialSum(idea) {
+  const r = idea?.retrial;
+  if (!r || !CRITERIA.every((c) => Number.isInteger(r[c]))) return null;
+  return r.originality + r.feasibility + r.impact;
+}
+
+/**
+ * The confidence band between the two judges: low and high sum, their medals,
+ * and the gap. null until both have scored.
+ */
+export function confidenceBand(idea) {
+  const a = scoreSum(idea);
+  const b = retrialSum(idea);
+  if (a == null || b == null) return null;
+  const low = Math.min(a, b), high = Math.max(a, b);
+  return { first: a, second: b, low, high, gap: high - low, medals: [medalFromSum(low), medalFromSum(high)], agree: medalFromSum(a) === medalFromSum(b) };
+}

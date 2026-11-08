@@ -5,15 +5,15 @@ import { $, h, clear, toast, debounce } from './dom.js';
 import { t, getLang, setLang, applyI18n, errorText } from './i18n.js';
 import { Graph, KIND_COLORS } from './graph.js';
 import { loadSettings, saveSettings, pushSettings, ROLES, PROVIDER_IDS, providersInUse, DEFAULTS } from './settings.js';
-import { medal, scoreSum, fitness, CRITERIA } from './score.js';
-import { evolutionStats, liftStats, liftHit, LIFT_TYPES } from './evolve.js';
+import { medal, scoreSum, fitness, CRITERIA, isJudged, onMedalEdge, confidenceBand, MEDAL_MIN_SUM } from './score.js';
+import { evolutionStats, liftStats, liftHit, LIFT_TYPES, doubtPenalty } from './evolve.js';
 import { openDashboard } from './dashboard.js';
 import { openReport } from './report.js';
 import { initBuilds, onBuildEvent, buildFor, startBuild, openBuilds, buildIcon, formatSeq } from './builds.js';
 
 const MEDAL_ICON = ['–', '🥉', '🥈', '🥇'];
 const S = {
-  boards: [], board: null, ideas: new Map(), edges: [], leads: [], spinoffs: [], judging: new Set(),
+  boards: [], board: null, ideas: new Map(), edges: [], leads: [], spinoffs: [], judging: new Set(), retrying: new Set(),
   autopilot: { state: 'manual' }, spentToday: 0, selected: null, templates: [], providers: null,
   settings: loadSettings(), stopFollow: null, createAt: null, leadsTab: 'x', refreshing: {}, exhibit: false,
   version: null,
@@ -92,6 +92,7 @@ async function openBoard(id) {
   S.leads = data.leads;
   S.spinoffs = data.spinoffs;
   S.judging = new Set(data.judging);
+  S.retrying = new Set(data.retrying ?? []);
   S.autopilot = data.autopilot;
   S.spentToday = data.spentToday;
   S.selected = null;
@@ -143,6 +144,10 @@ function onEvent(e) {
     case 'judging':
       for (const id of e.ids) e.on ? S.judging.add(id) : S.judging.delete(id);
       graph.setJudging(e.ids, e.on);
+      if (e.ids.includes(S.selected)) renderPanelSoon();
+      break;
+    case 'retrying':
+      for (const id of e.ids) e.on ? S.retrying.add(id) : S.retrying.delete(id);
       if (e.ids.includes(S.selected)) renderPanelSoon();
       break;
     case 'board':
@@ -418,6 +423,63 @@ function liftBlock(idea) {
   return h('div', { class: 'lift' }, task, recipe);
 }
 
+/**
+ * The second opinion: for a verdict on a medal edge, a blind second judge on
+ * another model. Shows the band between the two sums on the 3–15 scale with
+ * the medal thresholds, and what the disagreement costs the idea when breeding.
+ */
+function doubtBlock(idea) {
+  if (S.judging.has(idea.id) || !isJudged(idea)) return null;
+  const busy = S.retrying.has(idea.id);
+  const band = confidenceBand(idea);
+  if (!band && !busy && !onMedalEdge(idea)) return null;
+  const sum = scoreSum(idea);
+  // 13 cells, one per possible sum 3–15; v is a cell's centre, v - 0.5 its left edge.
+  const pos = (v) => `${((v - 2.5) / 13) * 100}%`;
+  const ask = h('button', { class: 'btn small', onclick: (ev) => askRetrial(idea.id, ev.currentTarget) }, band ? t('retrialAgain') : t('retrialAsk'));
+  const head = h('div', { class: 'doubt-head', title: t('retrialHint') }, `⚖ ${t('retrialTitle')}`);
+  if (!band) {
+    return h('div', { class: 'doubt' }, head,
+      h('p', { class: 'muted' }, t('retrialEdge', { sum, medal: MEDAL_ICON[medal(idea)] })),
+      busy ? h('div', { class: 'judging' }, h('span', { class: 'spinner' }), t('retrialBusy')) : ask);
+  }
+  const r = idea.retrial;
+  const penalty = doubtPenalty(idea);
+  return h('div', { class: `doubt ${band.agree ? 'agree' : 'disagree'}` }, head,
+    h('div', { class: 'band', role: 'img', 'aria-label': t('retrialBandAria', { low: band.low, high: band.high }) },
+      h('div', { class: 'band-track' },
+        Object.values(MEDAL_MIN_SUM).map((v) => h('span', { class: 'band-edge', style: { left: pos(v - 0.5) } })),
+        h('span', { class: 'band-fill', style: { left: pos(band.low - 0.5), width: `${((band.gap + 1) / 13) * 100}%` } }),
+        h('span', { class: 'band-mark first', style: { left: pos(band.first) }, title: t('retrialFirst') }),
+        h('span', { class: 'band-mark second', style: { left: pos(band.second) }, title: t('retrialSecond') }),
+      ),
+      h('div', { class: 'band-scale muted' }, h('span', {}, '3'), h('span', {}, '15')),
+    ),
+    h('div', { class: 'doubt-line' },
+      h('span', { class: 'band-key first' }), `${t('retrialFirst')} ${band.first}`, ' · ',
+      h('span', { class: 'band-key second' }), `${t('retrialSecond')} ${band.second}`,
+      h('span', { class: 'muted' }, ` (${CRITERIA.map((c) => r[c]).join('·')}, ${r.model})`),
+    ),
+    h('div', { class: 'doubt-verdict' },
+      band.gap === 0 ? t('retrialSame', { sum: band.first })
+      : band.agree ? t('retrialBandSameMedal', { low: band.low, high: band.high })
+      : t('retrialBand', { low: band.low, high: band.high, a: MEDAL_ICON[band.medals[0]], b: MEDAL_ICON[band.medals[1]] })),
+    r.reason ? h('p', { class: 'reason' }, r.reason) : null,
+    penalty ? h('div', { class: 'muted' }, t('retrialPenalty', { p: penalty.toFixed(1) })) : null,
+    busy ? h('div', { class: 'judging' }, h('span', { class: 'spinner' }), t('retrialBusy')) : ask,
+  );
+}
+
+async function askRetrial(id, btn) {
+  if (btn) btn.disabled = true;
+  try {
+    await api('POST', `/api/ideas/${id}/retrial`, {});
+  } catch (e) {
+    fail(e);
+    if (btn) btn.disabled = false;
+  }
+}
+
 /** Overview: hits per recipe type on this board. */
 function liftOverview(ideas) {
   const stats = liftStats(ideas);
@@ -456,6 +518,7 @@ function renderIdea(idea) {
     idea.pitch ? h('p', { class: 'pitch' }, idea.pitch) : null,
     idea.sourceUrl ? h('a', { class: 'source', href: idea.sourceUrl, target: '_blank', rel: 'noopener noreferrer' }, `${t('source')} ↗`) : null,
     scoreBlock(idea),
+    doubtBlock(idea),
     liftBlock(idea),
     idea.keywords?.length
       ? h('div', { class: 'chips' }, idea.keywords.map((k) => h('button', { class: 'chip', onclick: () => openDashboard({ keyword: k, onOpenIdea }) }, k)))

@@ -1,8 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { clampScore, fitness, medal, medalFromSum, scoreSum } from '../public/js/score.js';
+import { clampScore, fitness, medal, medalFromSum, scoreSum, onMedalEdge, confidenceBand, retrialSum } from '../public/js/score.js';
 import {
-  breedScore, evolutionStats, expandedIds, liftHit, liftRate, liftStats, nextMove, pairKey, pickRecipe, recipeOf, usedPairs,
+  breedScore, doubtPenalty, evolutionStats, expandedIds, liftHit, liftRate, liftStats, nextMove, pairKey, pickRecipe, recipeOf, usedPairs,
 } from '../public/js/evolve.js';
 
 const idea = (id: number, sum: number | null, extra: any = {}) => {
@@ -182,4 +182,33 @@ test('the hit-rate nudge breaks ties in selection but never beats a point of jur
     if (m?.type === 'combine') for (const p of [m.a, m.b]) count.set(p.id, (count.get(p.id) ?? 0) + 1);
   }
   assert.ok((count.get(1) ?? 0) > (count.get(2) ?? 0) * 1.2, `impact ${count.get(1)} vs feasibility ${count.get(2)}`);
+});
+
+// ---------------------------------------------------------------- second opinion
+
+const second = (o: number, f: number, i: number) => ({ retrial: { originality: o, feasibility: f, impact: i, reason: '', model: 'm', at: '' } });
+
+test('second opinion: only a jury sum exactly on a medal threshold is on the edge', () => {
+  assert.deepEqual([8, 9, 10, 11, 12, 13, 14].map((s) => onMedalEdge(idea(1, s))), [false, true, false, true, false, true, false]);
+  assert.equal(onMedalEdge(idea(1, null)), false, 'not judged');
+  assert.equal(onMedalEdge(idea(1, 11, { medalOverride: 2 })), false, 'a hand-set medal is not doubted');
+});
+
+test('second opinion: the band spans both sums and says whether the medals agree', () => {
+  assert.equal(confidenceBand(idea(1, 13)), null, 'no second opinion yet');
+  assert.equal(retrialSum(idea(1, 13, { retrial: { originality: 4, feasibility: 'x', impact: 4 } })), null, 'malformed');
+  assert.deepEqual(confidenceBand(idea(1, 13, second(4, 3, 4))), { first: 13, second: 11, low: 11, high: 13, gap: 2, medals: [2, 3], agree: false });
+  assert.equal(confidenceBand(idea(1, 11, second(4, 4, 4)))!.agree, true, '11 and 12 are both silver');
+  assert.equal(confidenceBand(idea(1, 11, second(4, 3, 4)))!.gap, 0);
+});
+
+test('second opinion: disagreement lowers the breeding score by half the gap, either way; agreement costs nothing', () => {
+  assert.equal(breedScore(idea(1, 13, second(3, 4, 4)), {}), 12);
+  assert.equal(breedScore(idea(1, 9, second(4, 4, 4)), {}), 7.5, 'a higher second opinion is doubt too');
+  assert.equal(breedScore(idea(1, 11, second(3, 4, 4)), {}), 11);
+  assert.equal(doubtPenalty(idea(1, 13, { ...second(1, 4, 4), medalOverride: 3 })), 0, 'a person decided');
+  // An undisputed 12 now outbreeds a 13 the second judge put at 9.
+  assert.ok(breedScore(idea(1, 12), {}) > breedScore(idea(2, 13, second(1, 4, 4)), {}));
+  // The medal itself stays the jury's.
+  assert.equal(medal(idea(2, 13, second(1, 4, 4))), 3);
 });
