@@ -84,7 +84,7 @@ export function liftHit(idea) {
 
 /** Share of recipe breeds that get the placebo instead. */
 export const PLACEBO_RATE = 0.2;
-export const ARMS = ['recipe', 'placebo', 'none'];
+export const ARMS = ['recipe', 'placebo', 'none', 'control'];
 
 /** Which arm a bred idea belongs to. Ideas from before the trials that carry a recipe type were recipe breeds. */
 export function armOf(idea) {
@@ -148,6 +148,66 @@ export function trialVerdict(stats) {
   return { verdict: diff > 0.1 ? 'ahead' : diff < -0.1 ? 'behind' : 'even', diff };
 }
 
+// ---------------------------------------------------------------- control siblings and net lift
+//
+// A raw hit rate flatters nothing and blames nothing: a bronze parent's child
+// may land on silver by luck, or fall back by regression to the mean, with or
+// without a recipe. So every CONTROL_EVERY-th recipe cross the autopilot makes
+// gets a control sibling: the same two parents crossed again with no task at
+// all (arm 'control', liftType the withheld type, same liftBase). The net
+// lift of a recipe type is the mean medal gain of its recipe children minus
+// the mean gain of its control siblings. Placebos still never steer breeding.
+
+/** Every this many recipe crosses on a board, the autopilot breeds one control sibling. */
+export const CONTROL_EVERY = 4;
+
+/** Is a control sibling due after this many recipe-arm crosses? (Counted after the newest one was made.) */
+export const controlDue = (recipeCrosses) => recipeCrosses > 0 && recipeCrosses % CONTROL_EVERY === 0;
+
+/** Medal steps gained over the parent's medal at breeding time (negative: it fell). null: in no arm, or not judged. */
+export function medalGain(idea) {
+  if (!armOf(idea) || !Number.isInteger(idea?.liftBase)) return null;
+  const m = medal(idea);
+  return m == null ? null : m - idea.liftBase;
+}
+
+/**
+ * Per recipe type: n and mean gain in the recipe arm, n and mean gain in the
+ * control arm, and the net lift (recipe mean minus control mean), null until
+ * both arms have at least one judged child of that type.
+ * @returns {Record<string, {n:number, gain:number|null, controlN:number, controlGain:number|null, net:number|null}>}
+ */
+export function netLiftStats(ideas) {
+  const sums = Object.fromEntries(LIFT_TYPES.map((t) => [t, { recipe: [0, 0], control: [0, 0] }]));
+  for (const i of ideas) {
+    const arm = armOf(i);
+    if ((arm !== 'recipe' && arm !== 'control') || !sums[i.liftType]) continue;
+    const g = medalGain(i);
+    if (g == null) continue;
+    sums[i.liftType][arm][0]++;
+    sums[i.liftType][arm][1] += g;
+  }
+  const mean = ([n, s]) => (n ? s / n : null);
+  return Object.fromEntries(LIFT_TYPES.map((t) => {
+    const r = sums[t].recipe, c = sums[t].control;
+    const gain = mean(r), controlGain = mean(c);
+    return [t, { n: r[0], gain, controlN: c[0], controlGain, net: gain == null || controlGain == null ? null : gain - controlGain }];
+  }));
+}
+
+/**
+ * The selection nudge from a type's net lift, strictly within ±0.5 like the
+ * hit-rate nudge it replaces, and shrunk toward 0 while the smaller arm is
+ * small (one control sibling counts for a third of its face value). null: no
+ * net lift yet, so the caller falls back to the hit rate.
+ */
+export function netNudge(net, type) {
+  const s = net?.[type];
+  if (!s || s.net == null) return null;
+  const k = Math.min(s.n, s.controlN);
+  return (k / (k + 2)) * (s.net / (2 * (Math.abs(s.net) + 1)));
+}
+
 /** The recipe an idea can hand on: it needs one, and gold has no next medal to reach. */
 export function recipeOf(idea) {
   if (!LIFT_TYPES.includes(idea?.recipeType) || !idea?.recipe) return null;
@@ -168,11 +228,14 @@ export function pickRecipe(a, b, stats) {
  * What the tournament compares: fitness plus a nudge from the hit rate of the
  * idea's own recipe type. The nudge stays within ±0.5, so it never beats a
  * full point of jury score; it decides between ideas the jury scored the same.
+ * Once control siblings exist for the type (net: netLiftStats), the net lift
+ * over control decides instead of the raw hit rate (netNudge, also within ±0.5).
  * A disagreeing second judge then takes off half the gap (doubtPenalty).
  */
-export function breedScore(idea, stats) {
+export function breedScore(idea, stats, net = null) {
   const r = recipeOf(idea);
-  return fitness(idea) + (r ? liftRate(stats, r.type) - 0.5 : 0) - doubtPenalty(idea);
+  const nudge = r ? netNudge(net, r.type) ?? liftRate(stats, r.type) - 0.5 : 0;
+  return fitness(idea) + nudge - doubtPenalty(idea);
 }
 
 /**
@@ -261,11 +324,11 @@ export function pressureStats(ideas, window = DIVERSITY_WINDOW) {
   };
 }
 
-function tournament(pool, k, rng, stats) {
+function tournament(pool, k, rng, stats, net) {
   let best = null;
   for (let i = 0; i < k; i++) {
     const c = pool[Math.floor(rng() * pool.length)];
-    if (!best || breedScore(c, stats) > breedScore(best, stats)) best = c;
+    if (!best || breedScore(c, stats, net) > breedScore(best, stats, net)) best = c;
   }
   return best;
 }
@@ -284,6 +347,7 @@ export function nextMove(ideas, edges, opts = {}) {
   const expanded = expandedIds(ideas, edges);
   const used = usedPairs(ideas, edges);
   const stats = liftStats(ideas);
+  const net = netLiftStats(ideas);
 
   // Diversity pressure: in a monoculture, one parent comes from outside the theme.
   const div = opts.diversity === false ? null : diversity(ideas);
@@ -304,9 +368,9 @@ export function nextMove(ideas, edges, opts = {}) {
   if (pool.length >= 2) {
     const first = outside.length ? outside : pool;
     for (let attempt = 0; attempt < 40; attempt++) {
-      const a = tournament(first, k, rng, stats);
+      const a = tournament(first, k, rng, stats, net);
       const rest = pool.filter((i) => i.id !== a.id);
-      const b = tournament(rest, k, rng, stats);
+      const b = tournament(rest, k, rng, stats, net);
       const key = pairKey(a.id, b.id);
       if (used.has(key) || inFlight.has(key)) continue;
       return mark({ type: 'combine', a, b });

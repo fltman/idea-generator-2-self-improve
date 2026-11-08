@@ -154,3 +154,48 @@ test('autoStep in a keyword monoculture breeds outside it and marks the child', 
   }
   assert.ok(repo.listEdges(board.id).some((e) => out.some((o) => o.id === e.from)), 'the neglected ideas got children');
 });
+
+test('autoStep breeds a no-task control sibling of every fourth recipe cross, and the net lift can be read', async () => {
+  const { netLiftStats, armOf } = await import('../public/js/evolve.js');
+  const repo = openDb(':memory:');
+  const combines: ChatRequest[] = [];
+  let n = 0;
+  const chat = async (r: ChatRequest) => {
+    n++;
+    if (r.schemaName === 'combine') combines.push(r);
+    const value =
+      r.schemaName === 'expand' ? { ideas: [1, 2].map((k) => ({ title: `Gren ${n}.${k}`, pitch: 'p' })) }
+      : r.schemaName === 'judgement' ? { reason: 'r', originality: 3, feasibility: 3, impact: 3, keywords: [], liftType: 'impact', lift: `Mät effekten ${n}.` }
+      : { title: `Korsning ${n}`, pitch: 'p' };
+    return { value, costUsd: 0 };
+  };
+  const engine = createEngine({ repo, chat, settings: () => DEFAULT_APP_SETTINGS, gitInit: false, trialRng: () => 0.99 });
+  const board = repo.createBoard({ title: 'B' });
+  for (let k = 0; k < 5; k++) {
+    const i = repo.insertIdea({ boardId: board.id, title: `Förälder ${k}`, pitch: '', kind: 'expand', x: 0, y: 0, generation: 1 });
+    repo.saveJudgement(i.id, { originality: 3, feasibility: 3, impact: 3, reason: 'r', liftType: 'impact', lift: `Recept ${k}.` });
+  }
+  const recipeCrosses = () => repo.listIdeas(board.id).filter((i) => i.kind === 'combine' && armOf(i) === 'recipe');
+  const controls = () => repo.listIdeas(board.id).filter((i) => armOf(i) === 'control');
+  let step = 0;
+  while (recipeCrosses().length < 4 && step++ < 60) {
+    const r = await engine.autoStep(board.id);
+    if (recipeCrosses().length < 4) assert.equal(controls().length, 0, 'no control before the fourth recipe cross');
+    else assert.equal(r.ids!.length, 2, 'the fourth recipe cross brings its control sibling in the same step');
+  }
+  assert.equal(recipeCrosses().length, 4, `four recipe crosses in ${step} steps`);
+  const [sib] = controls();
+  assert.ok(sib, 'a control sibling was bred');
+  const fourth = recipeCrosses().at(-1)!;
+  assert.deepEqual([sib.kind, sib.liftType, sib.liftFrom, sib.liftBase], ['combine', fourth.liftType, fourth.liftFrom, fourth.liftBase]);
+  const parentsOf = (id: number) => repo.listEdges(board.id).filter((e) => e.to === id).map((e) => e.from).sort();
+  assert.deepEqual(parentsOf(sib.id), parentsOf(fourth.id), 'same two parents');
+  assert.doesNotMatch(combines.at(-1)!.user, /Your task|lift recipe/, 'the control sibling gets no task at all');
+  assert.match(combines.at(-2)!.user, /lift recipe/, 'its recipe sibling did');
+  assert.ok(repo.getIdea(sib.id)!.judgedAt, 'judged in the same step');
+  // Everything was judged bronze from a bronze base: zero gain in both arms, so the net lift is exactly 0.
+  const net = netLiftStats(repo.listIdeas(board.id)).impact;
+  assert.equal(net.controlN, 1);
+  assert.ok(net.n >= 4);
+  assert.equal(net.net, 0);
+});

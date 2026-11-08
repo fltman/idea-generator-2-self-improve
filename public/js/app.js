@@ -8,8 +8,12 @@ import { loadSettings, saveSettings, pushSettings, ROLES, PROVIDER_IDS, provider
 import { medal, scoreSum, fitness, CRITERIA, isJudged, onMedalEdge, confidenceBand, MEDAL_MIN_SUM, goldGate, retrialSum } from './score.js';
 import {
   evolutionStats, liftStats, LIFT_TYPES, doubtPenalty, armOf, armHit, trialStats, trialVerdict, ARMS, TRIAL_MIN,
-  diversity, diversitySeries, pressureStats, MONOCULTURE_SHARE, DIVERSITY_WINDOW,
+  diversity, diversitySeries, pressureStats, MONOCULTURE_SHARE, DIVERSITY_WINDOW, netLiftStats, CONTROL_EVERY,
 } from './evolve.js';
+
+/** A net lift in medal steps, signed, two decimals: +0.33, −0.50, ±0.00. */
+const signed = (x) => (x > 0 ? '+' : x < 0 ? '−' : '±') + Math.abs(x).toFixed(2);
+const netClass = (net) => (net == null ? 'none' : net > 0 ? 'up' : net < 0 ? 'down' : 'flat');
 import { openDashboard } from './dashboard.js';
 import { openReport } from './report.js';
 import { initBuilds, onBuildEvent, buildFor, startBuild, openBuilds, buildIcon, formatSeq } from './builds.js';
@@ -401,15 +405,19 @@ function scoreBlock(idea) {
 
 /** The jury's lift recipe for this idea, how often that type of recipe has worked here, and the task this idea was bred under. */
 function liftBlock(idea) {
-  const stats = liftStats(ideaList());
+  const all = ideaList();
+  const stats = liftStats(all);
   const typeName = (type) => t(type).toLowerCase();
   const recipe = idea.recipeType && idea.recipe ? (() => {
     const s = stats[idea.recipeType] ?? { tries: 0, hits: 0 };
+    const n = netLiftStats(all)[idea.recipeType];
     return [
       h('div', { class: 'lift-head', title: t('liftRecipeHint') }, `⬆ ${t('liftRecipe')} · ${t(idea.recipeType)}`),
       h('p', { class: 'lift-text' }, idea.recipe),
       h('div', { class: 'lift-rate muted' },
         s.tries ? t('liftHitRate', { type: typeName(idea.recipeType), hits: s.hits, tries: s.tries }) : t('liftHitNone', { type: typeName(idea.recipeType) })),
+      n ? h('div', { class: `lift-net net-${netClass(n.net)}`, title: t('netHint', { n: CONTROL_EVERY }) },
+        n.net == null ? t('netPanelNone', { n: n.n, c: n.controlN }) : t('netPanel', { net: signed(n.net), n: n.n, c: n.controlN })) : null,
     ];
   })() : null;
   let task = null;
@@ -417,7 +425,7 @@ function liftBlock(idea) {
   if (arm) {
     const parent = S.ideas.get(idea.liftFrom);
     const hit = armHit(idea);
-    const key = arm === 'placebo' ? 'liftTaskPlacebo' : arm === 'none' ? 'liftTaskNone' : 'liftTask';
+    const key = { placebo: 'liftTaskPlacebo', none: 'liftTaskNone', control: 'liftTaskControl' }[arm] ?? 'liftTask';
     task = h('div', { class: `lift-task arm-${arm}` },
       h('button', { class: 'linkish', disabled: !parent, onclick: () => parent && graph.h.select(parent.id) },
         t(key, { p: parent ? `"${parent.title}"` : '?', type: idea.liftType ? typeName(idea.liftType) : '' })),
@@ -514,7 +522,22 @@ function liftOverview(ideas) {
       v.verdict === 'early'
         ? t('trialEarly', { n: TRIAL_MIN, r: stats.recipe.total.tries, p: stats.placebo.total.tries })
         : t(`trial_${v.verdict}`, { r: pct(stats.recipe.total), p: pct(stats.placebo.total) })) : null,
+    any ? netChips(ideas) : null,
   );
+}
+
+/** One chip per recipe type: mean medal gain of recipe children minus that of their control siblings, with both n. */
+function netChips(ideas) {
+  const net = netLiftStats(ideas);
+  return h('div', { class: 'net-lift' },
+    h('span', { class: 'muted', title: t('netHint', { n: CONTROL_EVERY }) }, t('netTitle')),
+    h('div', { class: 'net-chips' },
+      LIFT_TYPES.map((type) => {
+        const s = net[type];
+        const vars = { type: t(type), net: s.net == null ? '–' : signed(s.net), n: s.n, c: s.controlN };
+        return h('span', { class: `net-chip net-${netClass(s.net)}`, role: 'img', 'aria-label': t('netChipAria', vars), title: t('netChipAria', vars) },
+          t(s.net == null ? 'netChipNone' : 'netChip', vars));
+      })));
 }
 
 /**

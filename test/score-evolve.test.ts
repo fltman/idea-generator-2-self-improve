@@ -5,6 +5,7 @@ import {
   breedScore, doubtPenalty, evolutionStats, expandedIds, liftHit, liftRate, liftStats, nextMove, pairKey, pickRecipe, recipeOf, usedPairs,
   assignArm, armOf, armHit, trialStats, trialVerdict, PLACEBO_RATE, TRIAL_MIN,
   diversity, diversitySeries, pressureStats, MONOCULTURE_SHARE, DIVERSITY_MIN,
+  CONTROL_EVERY, controlDue, medalGain, netLiftStats, netNudge,
 } from '../public/js/evolve.js';
 
 const idea = (id: number, sum: number | null, extra: any = {}) => {
@@ -216,6 +217,79 @@ test('placebo trials: hits per arm and type, only the recipe arm feeds liftStats
   assert.equal(v(arm(3, 10), arm(3, 10)).verdict, 'even');
   assert.equal(v(arm(1, 10), arm(5, 10)).verdict, 'behind');
   assert.equal(v(arm(9, 10), arm(1, TRIAL_MIN - 1)).verdict, 'early');
+});
+
+// ---------------------------------------------------------------- control siblings and net lift
+
+test('control siblings: due on every fourth recipe cross', () => {
+  assert.equal(CONTROL_EVERY, 4);
+  assert.deepEqual([0, 1, 3, 4, 5, 7, 8, 12].map(controlDue), [false, false, false, true, false, false, true, true]);
+});
+
+test('net lift: mean medal gain of recipe children minus that of control siblings, per type, null until both arms have data', () => {
+  const ideas = [
+    idea(1, 11, { liftType: 'impact', liftBase: 1, liftArm: 'recipe' }), // +1
+    idea(2, 10, { liftType: 'impact', liftBase: 1, liftArm: 'recipe' }), // 0
+    idea(3, 8, { liftType: 'impact', liftBase: 1, liftArm: 'recipe' }), // −1 (regression to the mean counts too)
+    idea(4, 11, { liftType: 'impact', liftBase: 1, liftArm: 'control' }), // +1: the control rose as well
+    idea(5, 11, { liftType: 'feasibility', liftBase: 1 }), // older recipe child, +1, no control
+    idea(6, 13, { liftType: 'impact', liftBase: 1, liftArm: 'placebo' }), // placebo: not in net lift
+    idea(7, null, { liftType: 'impact', liftBase: 1, liftArm: 'control' }), // not judged
+    idea(8, 9, { liftType: null, liftBase: 0, liftArm: 'none' }), // no-task arm: no type
+  ];
+  assert.deepEqual(ideas.map(medalGain), [1, 0, -1, 1, 1, 2, null, 1]);
+  assert.equal(armOf(ideas[3]), 'control', 'a control sibling is not mistaken for a recipe child, though it carries a type');
+  assert.equal(liftHit(ideas[3]), null, 'and it is not a recipe hit');
+  const net = netLiftStats(ideas);
+  assert.deepEqual(net.impact, { n: 3, gain: 0, controlN: 1, controlGain: 1, net: -1 });
+  assert.deepEqual(net.feasibility, { n: 1, gain: 1, controlN: 0, controlGain: null, net: null });
+  assert.deepEqual(net.originality, { n: 0, gain: null, controlN: 0, controlGain: null, net: null });
+  assert.deepEqual(trialStats(ideas).control.total, { tries: 1, hits: 1 });
+});
+
+test('net lift replaces the hit rate in selection ties once it exists, and stays strictly within ±0.5', () => {
+  // Raw hit rate says impact recipes work (20/20), but control siblings rose just as often: net lift 0.
+  const stats = { originality: { tries: 0, hits: 0 }, feasibility: { tries: 20, hits: 0 }, impact: { tries: 20, hits: 20 } };
+  const p = idea(1, 10, { recipeType: 'impact', recipe: 'x' });
+  assert.equal(breedScore(p, stats), 10 + 21 / 22 - 0.5, 'without controls: the hit rate');
+  const zero = { impact: { n: 20, gain: 1, controlN: 5, controlGain: 1, net: 0 } };
+  assert.equal(breedScore(p, stats, zero), 10, 'net lift 0: no nudge at all');
+  assert.equal(breedScore(p, stats, { impact: { n: 20, controlN: 0, net: null } }), 10 + 21 / 22 - 0.5, 'no control yet: falls back');
+  for (const net of [-3, -1, -0.2, 0.2, 1, 3]) {
+    for (const k of [1, 5, 1000]) {
+      const v = netNudge({ impact: { n: k, controlN: k, net } }, 'impact');
+      assert.ok(Math.abs(v) < 0.5 && Math.sign(v) === Math.sign(net), `net ${net}, n ${k}: ${v}`);
+    }
+  }
+  assert.ok(netNudge({ impact: { n: 9, controlN: 1, net: 1 } }, 'impact') < netNudge({ impact: { n: 9, controlN: 9, net: 1 } }, 'impact'), 'few controls: shrunk');
+  const big = { impact: { n: 1000, controlN: 1000, net: 3 } };
+  assert.ok(breedScore(idea(2, 11), stats, big) > breedScore(p, stats, big), 'never beats a point of jury score');
+
+  // Two equal ideas: the one whose recipe type has the better net lift is picked more often.
+  const ideas = [
+    idea(1, 10, { recipeType: 'impact', recipe: 'x' }),
+    idea(2, 10, { recipeType: 'feasibility', recipe: 'x' }),
+    idea(3, 10),
+    // impact: high raw hit rate but no better than control; feasibility: lower hit rate, beats its controls.
+    ...Array.from({ length: 4 }, (_, n) => idea(10 + n, 11, { liftType: 'impact', liftBase: 1, liftArm: 'recipe' })),
+    ...Array.from({ length: 4 }, (_, n) => idea(20 + n, 11, { liftType: 'impact', liftBase: 1, liftArm: 'control' })),
+    ...Array.from({ length: 2 }, (_, n) => idea(30 + n, 11, { liftType: 'feasibility', liftBase: 1, liftArm: 'recipe' })),
+    ...Array.from({ length: 2 }, (_, n) => idea(40 + n, 10, { liftType: 'feasibility', liftBase: 1, liftArm: 'recipe' })),
+    ...Array.from({ length: 4 }, (_, n) => idea(50 + n, 8, { liftType: 'feasibility', liftBase: 1, liftArm: 'control' })),
+  ];
+  const s = liftStats(ideas);
+  assert.deepEqual([s.impact.hits, s.feasibility.hits], [4, 2]);
+  const n = netLiftStats(ideas);
+  assert.deepEqual([n.impact.net, n.feasibility.net], [0, 1.5]);
+  assert.ok(breedScore(ideas[0], s) > breedScore(ideas[1], s), 'by raw hit rate impact would win');
+  assert.ok(breedScore(ideas[1], s, n) > breedScore(ideas[0], s, n), 'by net lift feasibility wins');
+  const count = new Map<number, number>();
+  const rng = rngFrom(11);
+  for (let r = 0; r < 3000; r++) {
+    const m = nextMove(ideas, [], { rng, mutationRate: 0 });
+    if (m?.type === 'combine') for (const p of [m.a, m.b]) count.set(p.id, (count.get(p.id) ?? 0) + 1);
+  }
+  assert.ok((count.get(2) ?? 0) > (count.get(1) ?? 0) * 1.2, `nextMove uses net lift: feasibility ${count.get(2)} vs impact ${count.get(1)}`);
 });
 
 test('the hit-rate nudge breaks ties in selection but never beats a point of jury score', () => {
