@@ -170,6 +170,7 @@ test('the engine sends gold on a self-improvement board to the builder, with the
   engine.setMedal(byHand.id, 3);
   assert.deepEqual(gold, [self.id, byHand.id], 'gold set by hand also builds');
   assert.match(seen.at(-1)!.system, /APP CONTEXT/, 'the jury knows the app');
+  assert.match(seen.at(-1)!.system, /in Swedish, even when the source ideas are in another language/, "the board's language wins");
   await engine.expand(self.id);
   assert.match(seen.find((r) => r.schemaName === 'expand')!.system, /APP CONTEXT/);
   await engine.idle();

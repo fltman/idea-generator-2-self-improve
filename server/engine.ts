@@ -103,7 +103,12 @@ export function createEngine(deps: Deps) {
   const modelFor = (board: Board, role: Role) => board.config.models[role] || deps.settings().models[role];
   // On a self-improvement board the ideas are changes to this app, so every
   // prompt (and the jury) gets to know the app as it is right now.
-  const selfCtx = (board: Board) => (board.config.selfImprove && deps.selfContext ? deps.selfContext() : '');
+  // The board's language wins over the source ideas' here: one Swedish slip would
+  // otherwise breed a Swedish lineage, and the code and journal follow the board.
+  const selfCtx = (board: Board) =>
+    board.config.selfImprove && deps.selfContext
+      ? `${deps.selfContext()}\n\nWrite every title, pitch and reason in ${board.config.lang === 'sv' ? 'Swedish' : 'English'}, even when the source ideas are in another language.`
+      : '';
   const flowFor = (board: Board) => {
     const ctx = selfCtx(board);
     return ctx ? { ...board.config.flow, system: `${board.config.flow.system}\n\n${ctx}` } : board.config.flow;
